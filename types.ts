@@ -290,6 +290,7 @@ export interface ProjectState {
   aspectRatio: AspectRatio;
   exportResolution: Resolution;
   analyzedStylePrompt?: string; // Custom style from image analysis
+  characterLock?: string; // Fixed character description reused in every Golpo frame
   colorSplash?: string; // NEW: Color Splash Preference
   
   suggestedHooks?: string[]; 

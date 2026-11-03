@@ -675,7 +675,9 @@ const Storyboard: React.FC<Props> = ({ project, setProject, jackState, setJackSt
           project.aspectRatio,
           project.analyzedStylePrompt,
           scene.visualKeywords,
-          project.targetLanguage 
+          project.targetLanguage,
+          undefined,
+          project.characterLock
       );
       updateScene(scene.id, { imageUrl, isGenerating: false });
     } catch (error: any) {

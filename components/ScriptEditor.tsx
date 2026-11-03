@@ -261,7 +261,7 @@ const ScriptEditor: React.FC<Props> = ({ project, setProject }) => {
       try {
           const scenes = await parseScriptToScenes(project.script);
           setProject(prev => ({ ...prev, scenes, currentStep: 'storyboard' }));
-      } catch(e) { alert("Failed to parse."); }
+      } catch(e) { alert(`Failed to parse script: ${e instanceof Error ? e.message : String(e)}`); }
       finally { setLoading(false); }
   };
 
@@ -366,6 +366,18 @@ const ScriptEditor: React.FC<Props> = ({ project, setProject }) => {
                       {project.analyzedStylePrompt || "Analyzed style prompt will appear here. Or type your own detailed style description."}
                   </div>
               </div>
+              <label htmlFor="character-lock" className="block text-xs font-bold text-slate-700 dark:text-slate-300 mt-4 mb-2 uppercase tracking-wider">
+                  Character Lock <span className="normal-case font-normal text-slate-400">(same character in every frame)</span>
+              </label>
+              <textarea
+                  id="character-lock"
+                  aria-label="Character lock description"
+                  value={project.characterLock || ''}
+                  onChange={(e) => setProject(prev => ({ ...prev, characterLock: e.target.value }))}
+                  placeholder="e.g. Bald man, round glasses, tan sweater, simple dot eyes"
+                  rows={2}
+                  className="w-full bg-paper dark:bg-slate-950 border border-tan dark:border-slate-700 rounded-lg p-3 text-sm text-ink dark:text-slate-200 focus:outline-none focus:border-highlight"
+              />
           </div>
 
           {/* HAND LIBRARY */}

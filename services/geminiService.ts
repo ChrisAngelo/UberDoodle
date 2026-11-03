@@ -1,7 +1,10 @@
 import { GoogleGenAI, Type, Modality, ApiError } from "@google/genai";
 import { Scene, VeoModel, TitleGenerationResult, DescriptionGenerationResult, ArtStyle, BrushStyle, AspectRatio, GenAiProConfig, ThumbnailStyle } from "../types";
 import { generateLabsSpeech } from "./genAiProService";
-import { buildGolpoImagePrompt } from "./golpoStyle";
+import { buildGolpoImagePrompt, golpoizeDataUrl } from "./golpoStyle";
+
+/** Palette snap applied to pure-Golpo frames (0 = off, 1 = hard snap). Gentle by default to keep line detail. */
+const GOLPO_POSTPROCESS_STRENGTH = 0.4;
 
 // =============================================================================
 // MODEL CONFIG (single source of truth). Override any entry via Vite env vars.
@@ -485,7 +488,7 @@ export const generateSceneImage = async (prompt: string, artStyle: ArtStyle, bru
         language ? `Any lettering must be written in ${language}.` : '',
     ].filter(Boolean).join(' ');
 
-    let fullPrompt = buildGolpoImagePrompt(sceneText, { characterLock: characterLock ?? currentCharacterLock, textLabels: labels });
+    let fullPrompt = buildGolpoImagePrompt(sceneText, { characterLock: characterLock?.trim() || currentCharacterLock, textLabels: labels });
     if (variant) fullPrompt += `\n\nSTYLE VARIANT (takes priority over STYLE/LINEWORK/COLOR above where they conflict): ${variant}`;
     if (colorSplash) fullPrompt += `\n\nACCENT COLOR PREFERENCE: ${colorSplash}`;
     if (brushStyle) fullPrompt += `\n\nBRUSH: ${brushStyle}`;
@@ -498,7 +501,8 @@ export const generateSceneImage = async (prompt: string, artStyle: ArtStyle, bru
             imageConfig: { aspectRatio: DOODLE_IMAGE_ASPECT(aspectRatio) }
         }
     }, { timeoutMs: IMAGE_TIMEOUT, label: 'Scene image' });
-    return firstImage(response, 'Scene image');
+    const raw = firstImage(response, 'Scene image');
+    return !variant ? golpoizeDataUrl(raw, { strength: GOLPO_POSTPROCESS_STRENGTH }) : raw;
 };
 
 export const editImageWithGemini = async (imageBase64: string, prompt: string, aspectRatio: AspectRatio): Promise<string> => {

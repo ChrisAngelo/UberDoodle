@@ -286,3 +286,29 @@ export function golpoizeImageData(img: ImageData, opts?: { strength?: number }):
   }
   return img;
 }
+
+
+/**
+ * Browser-only: snap a generated image (data URL) toward the Golpo palette and paper.
+ * Returns the input unchanged when no DOM canvas is available or on any failure.
+ */
+export async function golpoizeDataUrl(dataUrl: string, opts?: { strength?: number }): Promise<string> {
+  if (typeof document === 'undefined' || typeof Image === 'undefined') return dataUrl;
+  try {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = dataUrl;
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx || !canvas.width || !canvas.height) return dataUrl;
+    ctx.drawImage(img, 0, 0);
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    ctx.putImageData(golpoizeImageData(data, opts), 0, 0);
+    return canvas.toDataURL('image/png');
+  } catch {
+    return dataUrl;
+  }
+}
