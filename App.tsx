@@ -1,10 +1,46 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ProjectState } from './types';
 import ScriptEditor from './components/ScriptEditor';
-import Storyboard from './components/Storyboard';
-import PreviewPlayer from './components/PreviewPlayer';
-import ThumbnailCreator from './components/ThumbnailCreator';
-import JackTheRipper from './components/JackTheRipper';
+const Storyboard = React.lazy(() => import('./components/Storyboard'));
+const PreviewPlayer = React.lazy(() => import('./components/PreviewPlayer'));
+const ThumbnailCreator = React.lazy(() => import('./components/ThumbnailCreator'));
+const JackTheRipper = React.lazy(() => import('./components/JackTheRipper'));
+
+type BoundaryProps = { children: React.ReactNode; label?: string; resetKey?: unknown };
+type BoundaryState = { error: Error | null };
+
+/** Catches render errors so a crash in one panel never blanks the whole studio. */
+export class ErrorBoundary extends React.Component<BoundaryProps, BoundaryState> {
+  // Explicit member declarations: the repo has no @types/react, so inherited members aren't typed.
+  declare props: Readonly<BoundaryProps>;
+  declare setState: (state: BoundaryState) => void;
+  state: BoundaryState = { error: null };
+  static getDerivedStateFromError(error: Error): BoundaryState { return { error }; }
+  componentDidCatch(error: Error, info: React.ErrorInfo) { console.error('[UberDoodle] UI crash', error, info.componentStack); }
+  componentDidUpdate(prev: BoundaryProps) {
+    if (this.state.error && prev.resetKey !== this.props.resetKey) this.setState({ error: null });
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div role="alert" className="m-6 max-w-xl mx-auto p-6 rounded-2xl border-2 border-[#CFAF8A] bg-[#FEFEFD] text-[#1B1009] shadow-[4px_4px_0_#7A5A3F]">
+        <h2 className="text-lg font-extrabold mb-2">{this.props.label || 'Something went wrong'}</h2>
+        <p className="text-sm text-[#7A5A3F] mb-4 break-words">{this.state.error.message || String(this.state.error)}</p>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => this.setState({ error: null })} className="px-4 py-2 rounded-full bg-[#D66A3A] text-white text-sm font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1B1009]">Try again</button>
+          <button onClick={() => window.location.reload()} className="px-4 py-2 rounded-full border border-[#CFAF8A] text-[#7A5A3F] text-sm font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1B1009]">Reload studio</button>
+        </div>
+      </div>
+    );
+  }
+}
+
+const PanelLoading: React.FC<{ label?: string }> = ({ label = 'Loading' }) => (
+  <div role="status" aria-live="polite" className="flex items-center justify-center gap-3 py-20 text-[#7A5A3F]">
+    <span className="w-5 h-5 rounded-full border-2 border-[#CFAF8A] border-t-[#D66A3A] animate-spin" aria-hidden="true" />
+    <span className="text-sm font-semibold">{label}...</span>
+  </div>
+);
 import { PenTool, Image, Film, Menu, Save, Upload, Undo, Redo, LayoutTemplate, FilePlus, Sparkles, MonitorPlay, Sun, Moon, Trash2, RefreshCw, Power, Scissors, Sword } from 'lucide-react';
 
 // --- ATTRIBUTION & VERSION CONTROL ---
@@ -80,6 +116,8 @@ const App: React.FC = () => {
 
   const [project, _setProject] = useState<ProjectState>(INITIAL_PROJECT_STATE);
   const [showJackGlobal, setShowJackGlobal] = useState(false);
+  const [jackEverOpened, setJackEverOpened] = useState(false);
+  useEffect(() => { if (showJackGlobal) setJackEverOpened(true); }, [showJackGlobal]);
   
   const [jackState, setJackState] = useState<JackPersistedState>({
       audioFile: null,
@@ -158,7 +196,7 @@ const App: React.FC = () => {
   const projectRef = useRef(project);
   useEffect(() => { projectRef.current = project; }, [project]);
 
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 768);
 
   useEffect(() => {
       const forceSaved = localStorage.getItem('DOODLEMINDS_FORCE_SAVE');
@@ -202,8 +240,12 @@ const App: React.FC = () => {
 
   useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
-          if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-          if (e.key === 'Tab') {
+          if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+          if (e.metaKey || e.ctrlKey || e.altKey) return;
+          // Don't hijack keys while focus is on an interactive control (keeps Tab/Space keyboard navigation working)
+          const t = e.target as HTMLElement | null;
+          if (t && t !== document.body && (t.isContentEditable || t.closest('button, a, [role="button"], [contenteditable="true"], label'))) return;
+          if (e.key === 'Tab' && !e.shiftKey) {
               e.preventDefault();
               setIsSidebarOpen(prev => !prev);
           }
@@ -331,33 +373,33 @@ const App: React.FC = () => {
               <span className={`font-extrabold text-lg tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>DoodleMinds</span>
             </div>
           )}
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className={`transition-colors ${isDarkMode ? 'text-slate-500 hover:text-white' : 'text-slate-400 hover:text-slate-900'}`}><Menu size={20} /></button>
+          <button onClick={() => setIsSidebarOpen(o => !o)} aria-label={isSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} aria-expanded={isSidebarOpen} className={`transition-colors ${isDarkMode ? 'text-slate-500 hover:text-white' : 'text-slate-400 hover:text-slate-900'}`}><Menu size={20} /></button>
         </div>
 
         <div className={`flex flex-col gap-4 px-4 py-4 ${!isSidebarOpen ? 'items-center' : ''}`}>
             <div className={`flex gap-2 ${!isSidebarOpen ? 'flex-col' : ''}`}>
-                <button onClick={handleUndo} disabled={historyIndex <= 0} className={`p-2 rounded-lg disabled:opacity-30 transition-colors border ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border-slate-200'}`} title="Undo"><Undo size={18} /></button>
-                <button onClick={handleRedo} disabled={historyIndex >= history.length - 1} className={`p-2 rounded-lg disabled:opacity-30 transition-colors border ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border-slate-200'}`} title="Redo"><Redo size={18} /></button>
+                <button onClick={handleUndo} disabled={historyIndex <= 0} className={`p-2 rounded-lg disabled:opacity-30 transition-colors border ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border-slate-200'}`} title="Undo" aria-label="Undo"><Undo size={18} /></button>
+                <button onClick={handleRedo} disabled={historyIndex >= history.length - 1} className={`p-2 rounded-lg disabled:opacity-30 transition-colors border ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border-slate-200'}`} title="Redo" aria-label="Redo"><Redo size={18} /></button>
             </div>
             <div className={`flex gap-2 ${!isSidebarOpen ? 'flex-col' : ''}`}>
-                <button onClick={handleResetProject} className={`p-2 rounded-lg hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors border ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-400' : 'bg-slate-50 text-slate-400 border-slate-200'}`} title="Clear Workspace"><Trash2 size={18} /></button>
-                <button onClick={() => window.location.reload()} className={`p-2 rounded-lg hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-red-900/30 transition-colors border ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-400' : 'bg-slate-50 text-slate-400 border-slate-200'}`} title="Refresh UI"><RefreshCw size={18} /></button>
+                <button onClick={handleResetProject} className={`p-2 rounded-lg hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors border ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-400' : 'bg-slate-50 text-slate-400 border-slate-200'}`} title="Clear Workspace" aria-label="Clear Workspace"><Trash2 size={18} /></button>
+                <button onClick={() => window.location.reload()} className={`p-2 rounded-lg hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-red-900/30 transition-colors border ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-400' : 'bg-slate-50 text-slate-400 border-slate-200'}`} title="Refresh UI" aria-label="Refresh UI"><RefreshCw size={18} /></button>
             </div>
             <div className={`flex gap-2 ${!isSidebarOpen ? 'flex-col' : ''}`}>
-                <button onClick={handleSave} className={`p-2 text-highlight rounded-lg transition-colors border ${isDarkMode ? 'bg-slate-800 border-slate-700 hover:bg-slate-700' : 'bg-slate-50 hover:bg-orange-100 border-slate-200'}`} title="Save Project"><Save size={18} /></button>
-                <label className={`p-2 text-highlight rounded-lg transition-colors border cursor-pointer ${isDarkMode ? 'bg-slate-800 border-slate-700 hover:bg-slate-700' : 'bg-slate-50 hover:bg-orange-100 border-slate-200'}`} title="Load Project"><Upload size={18} /><input type="file" onChange={handleLoad} accept=".json" className="hidden" /></label>
+                <button onClick={handleSave} className={`p-2 text-highlight rounded-lg transition-colors border ${isDarkMode ? 'bg-slate-800 border-slate-700 hover:bg-slate-700' : 'bg-slate-50 hover:bg-orange-100 border-slate-200'}`} title="Save Project" aria-label="Save Project"><Save size={18} /></button>
+                <label className={`p-2 text-highlight rounded-lg transition-colors border cursor-pointer ${isDarkMode ? 'bg-slate-800 border-slate-700 hover:bg-slate-700' : 'bg-slate-50 hover:bg-orange-100 border-slate-200'}`} title="Load Project" aria-label="Load Project"><Upload size={18} /><input type="file" onChange={handleLoad} accept=".json" className="hidden" /></label>
             </div>
         </div>
 
         <nav className="flex-1 px-3 space-y-2 mt-2 flex flex-col">
           {navItems.map((item) => (
-            <button key={item.id} onClick={() => setProject(prev => ({ ...prev, currentStep: item.id as any }))} className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all text-sm font-semibold ${project.currentStep === item.id ? 'bg-orange-50 text-orange-700 shadow-sm border border-orange-100 dark:bg-slate-800 dark:text-highlight dark:border-slate-700' : (isDarkMode ? 'text-slate-400 hover:bg-slate-800 hover:text-white' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900')} ${!isSidebarOpen ? 'justify-center' : ''}`}>
+            <button key={item.id} aria-label={item.label} aria-current={project.currentStep === item.id ? 'page' : undefined} onClick={() => setProject(prev => ({ ...prev, currentStep: item.id as any }))} className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all text-sm font-semibold ${project.currentStep === item.id ? 'bg-orange-50 text-orange-700 shadow-sm border border-orange-100 dark:bg-slate-800 dark:text-highlight dark:border-slate-700' : (isDarkMode ? 'text-slate-400 hover:bg-slate-800 hover:text-white' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900')} ${!isSidebarOpen ? 'justify-center' : ''}`}>
               <item.icon size={20} className={project.currentStep === item.id ? 'text-highlight' : (isDarkMode ? 'text-slate-500' : 'text-slate-400')} />
               {isSidebarOpen && <span>{item.label}</span>}
             </button>
           ))}
           {/* Global Jack Shortcut */}
-          <button onClick={() => setShowJackGlobal(true)} className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all text-sm font-semibold text-slate-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 ${!isSidebarOpen ? 'justify-center' : ''}`}>
+          <button onClick={() => setShowJackGlobal(true)} aria-label="Open Jack The Ripper audio splitter" className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all text-sm font-semibold text-slate-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 ${!isSidebarOpen ? 'justify-center' : ''}`}>
               <Sword size={20} className="text-red-500" />
               {isSidebarOpen && <span>Jack The Ripper</span>}
           </button>
@@ -370,28 +412,39 @@ const App: React.FC = () => {
         )}
       </aside>
 
-      <main className={`flex-1 overflow-hidden flex flex-col relative ${isDarkMode ? 'bg-slate-950' : 'bg-[#F8F9FC]'}`}>
-        <div className={`h-16 w-full border-b flex items-center px-8 justify-between shadow-[0_2px_15px_-3px_rgba(0,0,0,0.05)] z-20 ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-            <h2 className={`text-xl font-bold tracking-tight flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+      <main className={`flex-1 min-w-0 overflow-hidden flex flex-col relative ${isDarkMode ? 'bg-slate-950' : 'bg-[#F8F9FC]'}`}>
+        <div className={`h-16 w-full border-b flex items-center px-4 md:px-8 gap-3 justify-between min-w-0 shadow-[0_2px_15px_-3px_rgba(0,0,0,0.05)] z-20 ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+            <h2 className={`text-base md:text-xl font-bold tracking-tight flex items-center gap-2 truncate min-w-0 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                 {project.currentStep === 'script' && <><PenTool size={20} className="text-highlight"/> Script & Settings</>}
                 {project.currentStep === 'storyboard' && <><Image size={20} className="text-highlight"/> Visual Timeline</>}
                 {project.currentStep === 'preview' && <><Film size={20} className="text-highlight"/> Rendering Engine</>}
                 {project.currentStep === 'thumbnails' && <><LayoutTemplate size={20} className="text-highlight"/> Viral Thumbnail Creator</>}
             </h2>
             <div className="flex items-center gap-4">
-                <button onClick={handleManualThemeToggle} className={`p-2 rounded-full transition-colors border shadow-sm ${isDarkMode ? 'bg-slate-800 border-slate-700 text-yellow-400 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`} title={isDarkMode ? "Light Mode" : "Dark Mode"}>{isDarkMode ? <Sun size={16} /> : <Moon size={16} />}</button>
+                <button onClick={handleManualThemeToggle} className={`p-2 rounded-full transition-colors border shadow-sm ${isDarkMode ? 'bg-slate-800 border-slate-700 text-yellow-400 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`} title={isDarkMode ? "Light Mode" : "Dark Mode"} aria-label={isDarkMode ? "Light Mode" : "Dark Mode"}>{isDarkMode ? <Sun size={16} /> : <Moon size={16} />}</button>
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border shadow-sm ${isDarkMode ? 'bg-green-900/20 text-green-400 border-green-900/50' : 'bg-green-50 text-green-700 border-green-200'}`}><div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>Vertex AI Live</div>
             </div>
         </div>
-        <div className="flex-1 overflow-auto scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent p-6">
-           {renderStep()}
+        <div className="flex-1 overflow-auto scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent p-3 md:p-6">
+           <ErrorBoundary label="This panel crashed" resetKey={project.currentStep}>
+             <React.Suspense fallback={<PanelLoading label="Loading workspace" />}>
+               {renderStep()}
+             </React.Suspense>
+           </ErrorBoundary>
         </div>
       </main>
       
       {/* Jack the Ripper Global Modal */}
+      {/* Mounted on first open, then kept alive (hidden) so its internal state survives closing */}
+      {jackEverOpened && (
       <div style={{ display: showJackGlobal ? 'flex' : 'none', position: 'fixed', inset: 0, zIndex: 500 }}>
-          <JackTheRipper project={project} setProject={setProject} onClose={() => setShowJackGlobal(false)} initialState={jackState} onPersistState={setJackState} />
+          <ErrorBoundary label="Jack The Ripper crashed">
+            <React.Suspense fallback={<PanelLoading label="Loading Jack The Ripper" />}>
+              <JackTheRipper project={project} setProject={setProject} onClose={() => setShowJackGlobal(false)} initialState={jackState} onPersistState={setJackState} />
+            </React.Suspense>
+          </ErrorBoundary>
       </div>
+      )}
     </div>
   );
 };

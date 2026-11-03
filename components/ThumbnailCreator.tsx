@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ProjectState, ThumbnailStyle, Thumbnail, Scene } from '../types';
 import { generateHighCTRThumbnail, analyzeImageStyle } from '../services/geminiService';
 import { Wand2, Loader2, Download, Trash2, Image as ImageIcon, RefreshCw, Sparkles, LayoutTemplate, X, Upload, ChevronDown, Palette, Check } from 'lucide-react';
-import ImageEditModal from './ImageEditModal';
+const ImageEditModal = React.lazy(() => import('./ImageEditModal'));
 
 interface Props {
   project: ProjectState;
@@ -273,7 +273,7 @@ const ThumbnailCreator: React.FC<Props> = ({ project, setProject }) => {
                                <button 
                                   onClick={() => { setReferenceImagePreview(null); setStylePrompt(''); }}
                                   className="absolute top-1 right-1 bg-black/50 hover:bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-all"
-                                  title="Remove Image"
+                                  title="Remove Image" aria-label="Remove Image"
                                >
                                   <X size={12} />
                                </button>
@@ -322,8 +322,8 @@ const ThumbnailCreator: React.FC<Props> = ({ project, setProject }) => {
                       <div key={thumb.id} className="group relative bg-white dark:bg-slate-800 rounded-xl border-2 border-slate-200 dark:border-slate-700 overflow-hidden hover:border-black dark:hover:border-white transition-all shadow-sm hover:shadow-md cursor-zoom-in" onClick={() => setFullscreenThumb(thumb.imageUrl)}>
                           <img src={thumb.imageUrl} alt="Thumbnail" className="w-full aspect-video object-cover" />
                           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
-                              <button onClick={(e) => { e.stopPropagation(); downloadImage(thumb.imageUrl, thumb.id); }} className="p-3 bg-white rounded-full text-slate-900 hover:text-highlight shadow-lg transition-transform hover:scale-110" title="Download"><Download size={20} /></button>
-                              <button onClick={(e) => { e.stopPropagation(); setEditingThumbnail(thumb); }} className="p-3 bg-white rounded-full text-purple-500 hover:text-purple-700 shadow-lg transition-transform hover:scale-110" title="Magic Edit (Inpaint)"><Wand2 size={20} /></button>
+                              <button onClick={(e) => { e.stopPropagation(); downloadImage(thumb.imageUrl, thumb.id); }} className="p-3 bg-white rounded-full text-slate-900 hover:text-highlight shadow-lg transition-transform hover:scale-110" title="Download" aria-label="Download"><Download size={20} /></button>
+                              <button onClick={(e) => { e.stopPropagation(); setEditingThumbnail(thumb); }} className="p-3 bg-white rounded-full text-purple-500 hover:text-purple-700 shadow-lg transition-transform hover:scale-110" title="Magic Edit (Inpaint)" aria-label="Magic Edit (Inpaint)"><Wand2 size={20} /></button>
                           </div>
                           <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-[10px] font-bold px-2 py-1 truncate pointer-events-none">
                               {thumb.style} (Click to View)
@@ -344,6 +344,7 @@ const ThumbnailCreator: React.FC<Props> = ({ project, setProject }) => {
       
       {/* Magic Edit Modal */}
       {editingThumbnail && (
+        <React.Suspense fallback={null}>
         <ImageEditModal 
           isOpen={!!editingThumbnail}
           onClose={() => setEditingThumbnail(null)}
@@ -359,6 +360,7 @@ const ThumbnailCreator: React.FC<Props> = ({ project, setProject }) => {
           aspectRatio="16:9" // Thumbnails default to 16:9
           onUpdateImage={handleUpdateThumbnailImage}
         />
+        </React.Suspense>
       )}
     </div>
   );

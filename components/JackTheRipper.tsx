@@ -386,7 +386,7 @@ const JackTheRipper: React.FC<Props> = ({ project, setProject, onClose, initialS
         const url = URL.createObjectURL(file); setAudioUrl(url);
         try {
             const ab = await file.arrayBuffer(); const ctx = new AudioContext();
-            const buf = await ctx.decodeAudioData(ab); setAudioBuffer(buf); setAudioDuration(buf.duration);
+            const buf = await ctx.decodeAudioData(ab); ctx.close().catch(() => {}); setAudioBuffer(buf); setAudioDuration(buf.duration);
         } catch { setError('Failed to load audio'); }
     };
 
@@ -547,9 +547,9 @@ const JackTheRipper: React.FC<Props> = ({ project, setProject, onClose, initialS
                         <Search size={14} className="text-slate-500"/><input ref={searchInputRef} type="text" placeholder="Jump # (S)" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={(e) => { if(e.key === 'Enter') handleSearch(searchQuery); }} className="bg-transparent text-xs font-bold w-24 outline-none placeholder:text-slate-600"/>
                     </div>
                     <div className="flex bg-black/30 p-1 rounded-lg border border-white/10">
-                        <button onClick={()=>setToolMode('selector')} className={`p-2 rounded ${toolMode==='selector'?'bg-white/20 text-white':'text-white/40'}`} title="Selector (1)"><MousePointer size={18}/></button>
-                        <button onClick={()=>setToolMode('scissor')} className={`p-2 rounded ${toolMode==='scissor'?'bg-white/20 text-white':'text-white/40'}`} title="Scissor (2)"><Scissors size={18}/></button>
-                        <button onClick={()=>setToolMode('zoom')} className={`p-2 rounded ${toolMode==='zoom'?'bg-white/20 text-white':'text-white/40'}`} title="Zoom (3) / Hold Ctrl to zoom out" onDoubleClick={() => setZoom(timelineRef.current!.clientWidth/(audioDuration*100))}>{ctrlPressed ? <ZoomOut size={18}/> : <Search size={18}/>}</button>
+                        <button onClick={()=>setToolMode('selector')} className={`p-2 rounded ${toolMode==='selector'?'bg-white/20 text-white':'text-white/40'}`} title="Selector (1)" aria-label="Selector (1)"><MousePointer size={18}/></button>
+                        <button onClick={()=>setToolMode('scissor')} className={`p-2 rounded ${toolMode==='scissor'?'bg-white/20 text-white':'text-white/40'}`} title="Scissor (2)" aria-label="Scissor (2)"><Scissors size={18}/></button>
+                        <button onClick={()=>setToolMode('zoom')} className={`p-2 rounded ${toolMode==='zoom'?'bg-white/20 text-white':'text-white/40'}`} title="Zoom (3) / Hold Ctrl to zoom out" aria-label="Zoom (3) / Hold Ctrl to zoom out" onDoubleClick={() => setZoom(timelineRef.current!.clientWidth/(audioDuration*100))}>{ctrlPressed ? <ZoomOut size={18}/> : <Search size={18}/>}</button>
                     </div>
                     <div className="w-px h-6 bg-white/20 mx-1"/>
                     <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-2 hover:bg-white/10 rounded disabled:opacity-30"><Undo2 size={20}/></button>
@@ -606,14 +606,14 @@ const JackTheRipper: React.FC<Props> = ({ project, setProject, onClose, initialS
                 <div className="flex-1 flex flex-col bg-slate-950 overflow-hidden relative">
                     <div className="bg-slate-900 border-b border-slate-700 px-6 py-3 flex items-center gap-4 shrink-0">
                         <div className="flex items-center gap-1">
-                            <button onClick={()=>setScrubDir(-1)} className={`p-2 transition-colors ${scrubDir===-1?'text-red-500':'text-slate-400 hover:text-white'}`} title="Reverse (J)"><SkipBack size={20}/></button>
+                            <button onClick={()=>setScrubDir(-1)} className={`p-2 transition-colors ${scrubDir===-1?'text-red-500':'text-slate-400 hover:text-white'}`} title="Reverse (J)" aria-label="Reverse (J)"><SkipBack size={20}/></button>
                             <button onClick={togglePlayback} className="p-3 bg-red-600 hover:bg-red-500 rounded-full text-white shadow-lg active:scale-90">{isPlaying ? <Pause size={24}/> : <Play size={24} className="ml-1"/>}</button>
-                            <button onClick={()=>setScrubDir(1)} className={`p-2 transition-colors ${scrubDir===1?'text-red-500':'text-slate-400 hover:text-white'}`} title="Forward (L)"><SkipForward size={20}/></button>
+                            <button onClick={()=>setScrubDir(1)} className={`p-2 transition-colors ${scrubDir===1?'text-red-500':'text-slate-400 hover:text-white'}`} title="Forward (L)" aria-label="Forward (L)"><SkipForward size={20}/></button>
                         </div>
                         <div className="bg-black/50 px-4 py-2 rounded-lg font-mono text-2xl text-green-400 shadow-inner min-w-[180px] text-center tracking-tight">{fmtTC(playbackTime)}</div>
                         <div className="flex-1 flex items-center gap-4 justify-center"><button onClick={() => setAutoScroll(!autoScroll)} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${autoScroll ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-50'}`}><Disc size={14} className="inline mr-1"/> AUTO SCROLL {autoScroll?'ON':'OFF'} (A)</button></div>
                         <div className="flex items-center gap-2 bg-slate-800 rounded-lg px-2 py-1.5 border border-slate-700">
-                            <button onClick={() => setZoom(prev => Math.max(0.01, prev / 1.5))} className="hover:text-white transition-colors"><ZoomOut size={18}/></button><span className="text-xs min-w-[35px] text-center font-bold">{zoom.toFixed(2)}x</span><button onClick={() => setZoom(prev => Math.min(500, prev * 1.5))} className="hover:text-white transition-colors"><ZoomIn size={18}/></button><button onClick={()=>setZoom(timelineRef.current!.clientWidth/(audioDuration*100))} className="ml-2 p-1 hover:bg-slate-700 rounded text-highlight" title="Show Full Wave"><Maximize2 size={16}/></button>
+                            <button onClick={() => setZoom(prev => Math.max(0.01, prev / 1.5))} className="hover:text-white transition-colors"><ZoomOut size={18}/></button><span className="text-xs min-w-[35px] text-center font-bold">{zoom.toFixed(2)}x</span><button onClick={() => setZoom(prev => Math.min(500, prev * 1.5))} className="hover:text-white transition-colors"><ZoomIn size={18}/></button><button onClick={()=>setZoom(timelineRef.current!.clientWidth/(audioDuration*100))} className="ml-2 p-1 hover:bg-slate-700 rounded text-highlight" title="Show Full Wave" aria-label="Show Full Wave"><Maximize2 size={16}/></button>
                         </div>
                     </div>
                     <div className="relative flex-1 overflow-hidden bg-slate-950">
@@ -655,7 +655,7 @@ const JackTheRipper: React.FC<Props> = ({ project, setProject, onClose, initialS
                         <button onClick={async () => {
                             if (!audioBuffer) return; const zip = new JSZip(); const root = zip.folder(`${project.topic.substring(0, 10).replace(/\s/g, '_')}_Clips`);
                             for (const r of regions) { const start = Math.floor(r.start_ms/1000*audioBuffer.sampleRate), end = Math.ceil(r.end_ms/1000*audioBuffer.sampleRate); if (end <= start) continue; const slice = new AudioContext().createBuffer(audioBuffer.numberOfChannels, end-start, audioBuffer.sampleRate); for(let i=0; i<audioBuffer.numberOfChannels; i++) slice.copyToChannel(audioBuffer.getChannelData(i).slice(start, end), i); root?.file(`Scene_${r.sceneNumber}.wav`, bufferToWav(slice)); }
-                            const blob = await zip.generateAsync({type:'blob'}); const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='Clips.zip'; a.click();
+                            const blob = await zip.generateAsync({type:'blob'}); const a = document.createElement('a'); const zipUrl = URL.createObjectURL(blob); a.href=zipUrl; a.download='Clips.zip'; a.click(); setTimeout(() => URL.revokeObjectURL(zipUrl), 1000);
                         }} className="px-6 py-3 bg-slate-800 text-white font-bold rounded-xl shadow-lg flex items-center gap-2 hover:bg-slate-700 transition-all active:scale-95 uppercase tracking-tighter"><Download size={20}/> BOUNCE TO COMPUTER</button>
                         <button onClick={()=>{ setProject(p=>({...p, scenes: p.scenes.map(s => { const r = regions.find(x => x.sceneNumber === s.number); return r ? {...s, mediaStart: r.start_ms/1000, mediaEnd: r.end_ms/1000, audioUrl: audioUrl || s.audioUrl} : s; })})); setRegions(regions.map(r => ({...r, isApplied: true}))); setShowDoneText(true); setTimeout(() => setShowDoneText(false), 2500); }} className={`px-6 py-3 font-black rounded-xl shadow-2xl flex items-center gap-2 transition-all active:scale-95 uppercase tracking-tighter ${hasApplied ? 'bg-green-600 text-white hover:bg-green-500' : 'bg-yellow-500 text-slate-900 hover:bg-yellow-400'}`}><CheckSquare size={20}/> {hasApplied ? 'UPDATE PROJECT CLIPS' : 'ADD REGIONS TO PROJECT'}</button>
                     </div>

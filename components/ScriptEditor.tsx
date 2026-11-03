@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ProjectState, TitleGenerationResult, DescriptionGenerationResult, BackgroundOption, HandOption, LANGUAGES, NARRATION_STYLES, TargetDuration, TotalLength, ArtStyle, BrushStyle } from '../types';
 import { generateScript, parseScriptToScenes, analyzeImageStyle, generateViralHooks, generateOptimizedTitles, generateOptimizedDescription, translateText } from '../services/geminiService';
 import { Loader2, Wand2, ArrowRight, Eye, Upload, Sparkles, Type, ChevronDown, Copy, AlignLeft, Check, BarChart3, X, Trash2, Hand, ImageIcon, Crosshair, Move, Globe, Power, Plus, RefreshCw, Languages, FileText, Monitor, Smartphone, Volume2, Palette, Clock, Timer } from 'lucide-react';
-import VoiceSelectorModal from './VoiceSelectorModal';
+const VoiceSelectorModal = React.lazy(() => import('./VoiceSelectorModal'));
 
 interface Props {
   project: ProjectState;
@@ -386,10 +386,10 @@ const ScriptEditor: React.FC<Props> = ({ project, setProject }) => {
                       <div key={hand.id} onClick={() => !hand.isDisabled && setProject(prev => ({...prev, selectedHandId: hand.id}))} className={`group relative aspect-square rounded-xl border-2 overflow-hidden cursor-pointer transition-all ${hand.id === project.selectedHandId ? 'border-highlight ring-1 ring-highlight' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:border-highlight'} ${hand.isDisabled ? 'opacity-50 grayscale' : ''}`}>
                           <img src={hand.src} className="w-full h-full object-contain p-1" />
                           <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
-                              {!hand.isDisabled && <button onClick={(e) => { e.stopPropagation(); setCalibrationScale(hand.scale || 1.0); setCalibratingHand(hand); }} className="p-1 bg-white text-highlight rounded hover:bg-highlight hover:text-white" title="Calibrate"><Crosshair size={14}/></button>}
+                              {!hand.isDisabled && <button onClick={(e) => { e.stopPropagation(); setCalibrationScale(hand.scale || 1.0); setCalibratingHand(hand); }} className="p-1 bg-white text-highlight rounded hover:bg-highlight hover:text-white" title="Calibrate" aria-label="Calibrate"><Crosshair size={14}/></button>}
                               <div className="flex gap-1">
-                                  <button onClick={(e) => toggleHandDisable(hand.id, e)} className={`p-1 rounded text-white ${hand.isDisabled ? 'bg-amber-500 hover:bg-amber-600' : 'bg-slate-500 hover:bg-slate-600'}`} title={hand.isDisabled ? "Enable" : "Disable"}><Power size={14}/></button>
-                                  <button onClick={(e) => handleDeleteHand(hand.id, e)} className="p-1 bg-red-500 text-white rounded hover:bg-red-600" title="Delete"><Trash2 size={14}/></button>
+                                  <button onClick={(e) => toggleHandDisable(hand.id, e)} className={`p-1 rounded text-white ${hand.isDisabled ? 'bg-amber-500 hover:bg-amber-600' : 'bg-slate-500 hover:bg-slate-600'}`} title={hand.isDisabled ? "Enable" : "Disable"} aria-label={hand.isDisabled ? "Enable" : "Disable"}><Power size={14}/></button>
+                                  <button onClick={(e) => handleDeleteHand(hand.id, e)} className="p-1 bg-red-500 text-white rounded hover:bg-red-600" title="Delete" aria-label="Delete"><Trash2 size={14}/></button>
                               </div>
                           </div>
                       </div>
@@ -631,8 +631,8 @@ const ScriptEditor: React.FC<Props> = ({ project, setProject }) => {
                       >
                           <img src={bg.src} alt={bg.name} className="w-full h-full object-cover" />
                           <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={(e) => toggleBackgroundDisable(bg.id, e)} className={`p-1 rounded text-white ${bg.isDisabled ? 'bg-amber-500 hover:bg-amber-600' : 'bg-slate-500 hover:bg-slate-600'}`} title={bg.isDisabled ? "Enable" : "Disable"}><Power size={10}/></button>
-                              <button onClick={(e) => handleDeleteBackground(bg.id, e)} className="p-1 rounded bg-red-500 hover:bg-red-600 text-white" title="Delete"><Trash2 size={10}/></button>
+                              <button onClick={(e) => toggleBackgroundDisable(bg.id, e)} className={`p-1 rounded text-white ${bg.isDisabled ? 'bg-amber-500 hover:bg-amber-600' : 'bg-slate-500 hover:bg-slate-600'}`} title={bg.isDisabled ? "Enable" : "Disable"} aria-label={bg.isDisabled ? "Enable" : "Disable"}><Power size={10}/></button>
+                              <button onClick={(e) => handleDeleteBackground(bg.id, e)} className="p-1 rounded bg-red-500 hover:bg-red-600 text-white" title="Delete" aria-label="Delete"><Trash2 size={10}/></button>
                           </div>
                           {project.selectedBackgroundId === bg.id && (
                               <div className="absolute bottom-0 left-0 right-0 bg-highlight text-white text-[9px] font-bold px-1 py-0.5 text-center">Selected Default</div>
@@ -783,6 +783,7 @@ const ScriptEditor: React.FC<Props> = ({ project, setProject }) => {
       )}
 
       {showVoiceModal && (
+          <React.Suspense fallback={null}>
           <VoiceSelectorModal
               isOpen={showVoiceModal}
               onClose={() => setShowVoiceModal(false)}
@@ -793,6 +794,7 @@ const ScriptEditor: React.FC<Props> = ({ project, setProject }) => {
                   setShowVoiceModal(false);
               }}
           />
+          </React.Suspense>
       )}
     </div>
   );

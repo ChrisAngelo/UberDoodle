@@ -2,8 +2,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ProjectState, Scene, HandOption, VeoModel, LANGUAGES, TTS_VOICES, VoiceOption, GenAiProConfig } from '../types';
 import { generateSceneImage, generateSpeech, translateImageText, translateText, translateVisualPrompt, scanAndTranslateImageText, generateVeoVideo } from '../services/geminiService';
-import ImageEditModal from './ImageEditModal';
-import VoiceSelectorModal from './VoiceSelectorModal';
+const ImageEditModal = React.lazy(() => import('./ImageEditModal'));
+const VoiceSelectorModal = React.lazy(() => import('./VoiceSelectorModal'));
 import JackTheRipper from './JackTheRipper';
 import { JackPersistedState } from '../App'; // Import State Type
 import { Play, Image as ImageIcon, Edit, RefreshCw, Loader2, Mic, Smartphone, Monitor, Upload, Trash2, RotateCcw, Settings2, Hand, Download, X, Music, Mic2, Speaker, ArrowRight, ChevronDown, ChevronUp, Languages, CopyCheck, Sliders, Disc, Film, Search, ArrowDownCircle, Wand2, Activity, Scan, Video, Film as FilmIcon, Power, Blend, Copy, Film as AnimateIcon, FileAudio, Square, Split, Eye, Volume2, Octagon, Lock, Unlock, Globe, Scissors } from 'lucide-react';
@@ -210,7 +210,8 @@ const Storyboard: React.FC<Props> = ({ project, setProject, jackState, setJackSt
               console.warn("Download merge failed", e);
           }
       }
-      downloadImage(url, `scene_${scene.number}.png`);
+      if (!url) return;
+      downloadImage(url, scene.number);
   };
 
   useEffect(() => {
@@ -1156,7 +1157,7 @@ const Storyboard: React.FC<Props> = ({ project, setProject, jackState, setJackSt
       for (const scene of scenesToProcess) {
           updateScene(scene.id, { isGenerating: true });
           try {
-              const translatedImage = await translateImageText(scene.imageUrl!, targetLang, project.aspectRatio);
+              const translatedImage = await translateImageText(scene.imageUrl!, targetLang);
               updateScene(scene.id, { imageUrl: translatedImage });
           } catch (e) {
               console.error(`Translation failed for scene ${scene.number}`, e);
@@ -1521,12 +1522,12 @@ const Storyboard: React.FC<Props> = ({ project, setProject, jackState, setJackSt
                                 <button 
                                     onClick={() => setShowVoiceSelector(true)}
                                     className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg transition-colors shadow-sm" 
-                                    title="Open GenAiPro Voice Search"
+                                    title="Open GenAiPro Voice Search" aria-label="Open GenAiPro Voice Search"
                                 >
                                     <Globe size={14} />
                                 </button>
                                 
-                                <button onClick={() => handleAuditionVoice(project.voice)} disabled={!!auditioningVoice} className="bg-orange-50 dark:bg-orange-900/20 text-highlight p-2 rounded-lg hover:bg-orange-100 dark:hover:bg-orange-900/40 transition-colors" title="Audition">
+                                <button onClick={() => handleAuditionVoice(project.voice)} disabled={!!auditioningVoice} className="bg-orange-50 dark:bg-orange-900/20 text-highlight p-2 rounded-lg hover:bg-orange-100 dark:hover:bg-orange-900/40 transition-colors" title="Audition" aria-label="Audition">
                                     {auditioningVoice ? <Loader2 size={14} className="animate-spin"/> : <Play size={14} />}
                                 </button>
                             </div>
@@ -1673,12 +1674,12 @@ const Storyboard: React.FC<Props> = ({ project, setProject, jackState, setJackSt
                               <input type="file" accept="audio/mp3,audio/wav" className="hidden" onChange={handleMusicUpload} />
                         </label>
                         {project.globalSfxUrl && (
-                              <button onClick={handleApplyAudioToAll} className="hover:bg-green-50 dark:hover:bg-green-900/30 text-green-600 dark:text-green-400 px-3 py-1.5 rounded-md text-[10px] font-bold flex items-center gap-1" title="Apply Global SFX to All Cards">
+                              <button onClick={handleApplyAudioToAll} className="hover:bg-green-50 dark:hover:bg-green-900/30 text-green-600 dark:text-green-400 px-3 py-1.5 rounded-md text-[10px] font-bold flex items-center gap-1" title="Apply Global SFX to All Cards" aria-label="Apply Global SFX to All Cards">
                                   <CopyCheck size={12} /> Sync SFX
                               </button>
                         )}
                          <div className="w-[1px] h-4 bg-slate-200 dark:bg-slate-700 mx-1"></div>
-                         <button onClick={handleStopAllSound} className="p-1.5 bg-red-50 dark:bg-red-900/20 text-red-500 rounded-md hover:bg-red-500 hover:text-white transition-all" title="STOP SOUND">
+                         <button onClick={handleStopAllSound} className="p-1.5 bg-red-50 dark:bg-red-900/20 text-red-500 rounded-md hover:bg-red-500 hover:text-white transition-all" title="STOP SOUND" aria-label="STOP SOUND">
                              <Octagon size={14} fill="currentColor" />
                          </button>
                      </div>
@@ -1702,6 +1703,14 @@ const Storyboard: React.FC<Props> = ({ project, setProject, jackState, setJackSt
       
       {/* ... (Rest of Storyboard rendered list) ... */}
       <div className="space-y-6">
+        {project.scenes.length === 0 && (
+          <div className="flex flex-col items-center justify-center text-center gap-3 py-16 px-6 rounded-2xl border-2 border-dashed border-[#CFAF8A] bg-[#FEFEFD] text-[#7A5A3F]" role="status">
+            <ImageIcon size={40} className="text-[#CFAF8A]" aria-hidden="true" />
+            <p className="text-lg font-bold text-[#1B1009]">No scenes yet</p>
+            <p className="text-sm max-w-md">Write or generate a script first, then come back here to draw each scene on paper.</p>
+            <button onClick={() => setProject(prev => ({ ...prev, currentStep: 'script' }))} className="mt-2 px-5 py-2 rounded-full bg-[#D66A3A] hover:bg-[#b9552a] text-white text-sm font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1B1009]" aria-label="Go to script editor">Go to Script</button>
+          </div>
+        )}
         {project.scenes.map((scene, index) => {
           const bgUrl = getActiveBackgroundUrl(scene);
           const isCoherent = scene.audioUrl && scene.mediaStart !== undefined && scene.mediaEnd !== undefined;
@@ -1736,25 +1745,25 @@ const Storyboard: React.FC<Props> = ({ project, setProject, jackState, setJackSt
                 {/* Scene Header */}
                 <div className={`flex justify-between items-center px-4 py-3 border-b rounded-t-xl ${scene.type === 'video' ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800'}`}>
                     <div className="flex items-center gap-3">
-                         <div className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase flex items-center gap-2 tracking-wide ${scene.type === 'video' ? 'bg-highlight text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-50 dark:text-slate-400'}`}>
+                         <div className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase flex items-center gap-2 tracking-wide ${scene.type === 'video' ? 'bg-highlight text-white' : 'bg-[#CFAF8A]/25 dark:bg-slate-800 text-[#7A5A3F] dark:text-slate-400'}`}>
                              {scene.type === 'video' ? <FilmIcon size={12}/> : <ImageIcon size={12}/>} 
                              {scene.isDisabled ? 'DISABLED' : (scene.type === 'video' ? 'VIDEO SCENE' : 'SCENE')} 
                              <span className="opacity-100 text-slate-900 dark:text-white font-extrabold text-sm ml-1">#{scene.number}</span>
                          </div>
                     </div>
                     
-                    <div className="flex items-center gap-1 opacity-40 group-hover/card-wrapper:opacity-100 transition-opacity">
-                        <button onClick={(e) => handleDuplicateScene(e, scene.id)} className={`p-1.5 rounded-lg transition-all ${scene.type === 'video' ? 'hover:bg-slate-700 text-slate-400 hover:text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-highlight'}`} title="Duplicate Scene"><Copy size={14}/></button>
-                        <button onClick={(e) => handleMoveScene(e, scene.id, 'up')} disabled={index === 0} className={`p-1.5 rounded-lg transition-all disabled:opacity-20 disabled:hover:bg-transparent ${scene.type === 'video' ? 'hover:bg-slate-700 text-slate-400 hover:text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-highlight'}`} title="Move Up"><ChevronUp size={14}/></button>
-                        <button onClick={(e) => handleMoveScene(e, scene.id, 'down')} disabled={index === project.scenes.length - 1} className={`p-1.5 rounded-lg transition-all disabled:opacity-20 disabled:hover:bg-transparent ${scene.type === 'video' ? 'hover:bg-slate-700 text-slate-400 hover:text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-highlight'}`} title="Move Down"><ChevronDown size={14}/></button>
-                        <button onClick={(e) => handleMoveToLast(e, scene.id)} disabled={index === project.scenes.length - 1} className={`p-1.5 rounded-lg transition-all disabled:opacity-20 disabled:hover:bg-transparent ${scene.type === 'video' ? 'hover:bg-slate-700 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-violet-600'}`} title="Move Card to End"><ArrowDownCircle size={14}/></button>
+                    <div className="flex items-center gap-1 opacity-60 group-hover/card-wrapper:opacity-100 focus-within:opacity-100 transition-opacity flex-wrap justify-end">
+                        <button onClick={(e) => handleDuplicateScene(e, scene.id)} className={`p-1.5 rounded-lg transition-all ${scene.type === 'video' ? 'hover:bg-slate-700 text-slate-400 hover:text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-highlight'}`} title="Duplicate Scene" aria-label="Duplicate Scene"><Copy size={14}/></button>
+                        <button onClick={(e) => handleMoveScene(e, scene.id, 'up')} disabled={index === 0} className={`p-1.5 rounded-lg transition-all disabled:opacity-20 disabled:hover:bg-transparent ${scene.type === 'video' ? 'hover:bg-slate-700 text-slate-400 hover:text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-highlight'}`} title="Move Up" aria-label="Move Up"><ChevronUp size={14}/></button>
+                        <button onClick={(e) => handleMoveScene(e, scene.id, 'down')} disabled={index === project.scenes.length - 1} className={`p-1.5 rounded-lg transition-all disabled:opacity-20 disabled:hover:bg-transparent ${scene.type === 'video' ? 'hover:bg-slate-700 text-slate-400 hover:text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-highlight'}`} title="Move Down" aria-label="Move Down"><ChevronDown size={14}/></button>
+                        <button onClick={(e) => handleMoveToLast(e, scene.id)} disabled={index === project.scenes.length - 1} className={`p-1.5 rounded-lg transition-all disabled:opacity-20 disabled:hover:bg-transparent ${scene.type === 'video' ? 'hover:bg-slate-700 text-slate-400 hover:text-blue-400' : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-violet-600'}`} title="Move Card to End" aria-label="Move Card to End"><ArrowDownCircle size={14}/></button>
                         <div className="w-[1px] h-4 bg-slate-200 dark:bg-slate-700 mx-1"></div>
-                        <button onClick={(e) => toggleDisableScene(e, scene.id)} className={`p-1.5 rounded-lg transition-all ${scene.isDisabled ? 'text-white bg-amber-500 hover:bg-amber-600' : (scene.type === 'video' ? 'text-slate-400 hover:text-amber-400 hover:bg-slate-800' : 'text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20')}`} title={scene.isDisabled ? "Enable Card" : "Disable Card"}><Power size={14}/></button>
-                        <button onClick={() => toggleSceneLock(scene.id)} className={`p-1.5 rounded-lg transition-all ${scene.isLocked ? 'text-white bg-pink-500 hover:bg-pink-600' : (scene.type === 'video' ? 'text-slate-400 hover:text-pink-400 hover:bg-slate-800' : 'text-slate-400 hover:text-pink-600 hover:bg-pink-50 dark:hover:bg-pink-900/20')}`} title={scene.isLocked ? "Unlock Card" : "Lock Card"}>{scene.isLocked ? <Lock size={14}/> : <Unlock size={14}/>}</button>
+                        <button onClick={(e) => toggleDisableScene(e, scene.id)} className={`p-1.5 rounded-lg transition-all ${scene.isDisabled ? 'text-white bg-amber-500 hover:bg-amber-600' : (scene.type === 'video' ? 'text-slate-400 hover:text-amber-400 hover:bg-slate-800' : 'text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20')}`} title={scene.isDisabled ? "Enable Card" : "Disable Card"} aria-label={scene.isDisabled ? "Enable Card" : "Disable Card"}><Power size={14}/></button>
+                        <button onClick={() => toggleSceneLock(scene.id)} className={`p-1.5 rounded-lg transition-all ${scene.isLocked ? 'text-white bg-pink-500 hover:bg-pink-600' : (scene.type === 'video' ? 'text-slate-400 hover:text-pink-400 hover:bg-slate-800' : 'text-slate-400 hover:text-pink-600 hover:bg-pink-50 dark:hover:bg-pink-900/20')}`} title={scene.isLocked ? "Unlock Card" : "Lock Card"} aria-label={scene.isLocked ? "Unlock Card" : "Lock Card"}>{scene.isLocked ? <Lock size={14}/> : <Unlock size={14}/>}</button>
                     </div>
                 </div>
 
-                <div className={`w-full bg-slate-100 dark:bg-slate-800 border-b border-slate-100 dark:border-slate-800 relative group overflow-hidden aspect-video ${scene.type === 'video' ? 'bg-black' : ''}`}>
+                <div className={`w-full border-b border-[#CFAF8A]/40 relative group overflow-hidden aspect-[3/2] ${scene.type === 'video' ? 'bg-black' : 'bg-[#FEFEFD] dark:bg-[#FEFEFD]'}`}>
                      {scene.type !== 'video' && bgUrl && (
                          <div className="absolute inset-0 z-0">
                              <img src={bgUrl} className="w-full h-full object-cover opacity-100" />
@@ -1766,9 +1775,9 @@ const Storyboard: React.FC<Props> = ({ project, setProject, jackState, setJackSt
                             {scene.videoUrl ? (
                                 <>
                                     <video src={scene.videoUrl} className="w-full h-full object-contain bg-black" controls />
-                                    <div className="absolute top-4 right-4 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-30">
-                                        <button onClick={() => handleQuickPreview(scene.number)} className="p-3 bg-white rounded-full text-slate-900 hover:text-highlight shadow-lg transition-transform hover:scale-110" title="Play Video in Preview Mode"><Play size={24} fill="currentColor" /></button>
-                                        <label className={`p-3 bg-white rounded-full text-slate-900 hover:text-highlight shadow-lg cursor-pointer transition-transform hover:scale-110 ${scene.isLocked ? 'opacity-50 pointer-events-none' : ''}`} title="Replace Video"><Upload size={20} /><input type="file" accept="video/*" className="hidden" disabled={scene.isLocked} onChange={(e) => e.target.files?.[0] && handleReplaceImage(scene.id, e.target.files[0])} /></label>
+                                    <div className="absolute top-4 right-4 flex flex-col gap-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity z-30">
+                                        <button onClick={() => handleQuickPreview(scene.number)} className="p-3 bg-white rounded-full text-slate-900 hover:text-highlight shadow-lg transition-transform hover:scale-110" title="Play Video in Preview Mode" aria-label="Play Video in Preview Mode"><Play size={24} fill="currentColor" /></button>
+                                        <label className={`p-3 bg-white rounded-full text-slate-900 hover:text-highlight shadow-lg cursor-pointer transition-transform hover:scale-110 ${scene.isLocked ? 'opacity-50 pointer-events-none' : ''}`} title="Replace Video" aria-label="Replace Video"><Upload size={20} /><input type="file" accept="video/*" className="hidden" disabled={scene.isLocked} onChange={(e) => e.target.files?.[0] && handleReplaceImage(scene.id, e.target.files[0])} /></label>
                                     </div>
                                     <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-4 z-30 opacity-0 group-hover:opacity-100 transition-opacity px-4 pointer-events-none">
                                         <div className="flex items-center gap-2 bg-highlight/90 backdrop-blur-sm p-2 rounded-lg shadow-lg border-2 border-white pointer-events-auto">
@@ -1844,14 +1853,14 @@ const Storyboard: React.FC<Props> = ({ project, setProject, jackState, setJackSt
                              {scene.imageUrl ? (
                                 <>
                                     <img src={scene.imageUrl} alt={`Scene ${scene.number}`} className="w-full h-full object-contain cursor-zoom-in relative z-10" style={{ mixBlendMode: bgUrl ? (scene.layerBlendMode || 'multiply') : 'normal' }} onClick={() => setFullscreenImage(scene.imageUrl || null)} />
-                                    <div className="absolute top-4 right-4 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-30">
-                                        <button onClick={() => handleQuickPreview(scene.number)} className="p-3 bg-white/90 backdrop-blur rounded-full text-slate-900 hover:text-highlight shadow-md transition-transform hover:scale-110" title="Play Scene Preview"><Play size={20} fill="currentColor" /></button>
-                                        <button onClick={() => setEditingScene(scene)} disabled={scene.isLocked} className="p-3 bg-white/90 backdrop-blur rounded-full text-slate-900 hover:text-highlight shadow-md transition-transform hover:scale-110 disabled:opacity-50 disabled:hover:scale-100" title="Magic Edit"><Wand2 size={20} /></button>
-                                        <button onClick={(e) => handleAnimateImage(e, scene)} disabled={scene.isLocked || isPreparingAnimation} className="p-3 bg-highlight text-white rounded-full hover:bg-orange-700 shadow-md transition-transform hover:scale-110 disabled:opacity-50" title="Animate Image to Video (Veo)">{isPreparingAnimation ? <Loader2 size={20} className="animate-spin"/> : <AnimateIcon size={20} />}</button>
-                                        <label className={`p-3 bg-white/90 backdrop-blur rounded-full text-slate-900 hover:text-highlight shadow-md cursor-pointer transition-transform hover:scale-110 ${scene.isLocked ? 'opacity-50 pointer-events-none' : ''}`} title="Replace Image"><Upload size={20} /><input type="file" accept="image/*" className="hidden" disabled={scene.isLocked} onChange={(e) => e.target.files?.[0] && handleReplaceImage(scene.id, e.target.files[0])} /></label>
-                                        <button onClick={() => scene.imageUrl && handleSmartDownload(scene)} className="p-3 bg-white/90 backdrop-blur rounded-full text-slate-900 hover:text-highlight shadow-md transition-transform hover:scale-110" title="Download Image"><Download size={20} /></button>
+                                    <div className="absolute top-4 right-4 flex flex-col gap-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity z-30">
+                                        <button onClick={() => handleQuickPreview(scene.number)} className="p-3 bg-white/90 backdrop-blur rounded-full text-slate-900 hover:text-highlight shadow-md transition-transform hover:scale-110" title="Play Scene Preview" aria-label="Play Scene Preview"><Play size={20} fill="currentColor" /></button>
+                                        <button onClick={() => setEditingScene(scene)} disabled={scene.isLocked} className="p-3 bg-white/90 backdrop-blur rounded-full text-slate-900 hover:text-highlight shadow-md transition-transform hover:scale-110 disabled:opacity-50 disabled:hover:scale-100" title="Magic Edit" aria-label="Magic Edit"><Wand2 size={20} /></button>
+                                        <button onClick={(e) => handleAnimateImage(e, scene)} disabled={scene.isLocked || isPreparingAnimation} className="p-3 bg-highlight text-white rounded-full hover:bg-orange-700 shadow-md transition-transform hover:scale-110 disabled:opacity-50" title="Animate Image to Video (Veo)" aria-label="Animate Image to Video (Veo)">{isPreparingAnimation ? <Loader2 size={20} className="animate-spin"/> : <AnimateIcon size={20} />}</button>
+                                        <label className={`p-3 bg-white/90 backdrop-blur rounded-full text-slate-900 hover:text-highlight shadow-md cursor-pointer transition-transform hover:scale-110 ${scene.isLocked ? 'opacity-50 pointer-events-none' : ''}`} title="Replace Image" aria-label="Replace Image"><Upload size={20} /><input type="file" accept="image/*" className="hidden" disabled={scene.isLocked} onChange={(e) => e.target.files?.[0] && handleReplaceImage(scene.id, e.target.files[0])} /></label>
+                                        <button onClick={() => scene.imageUrl && handleSmartDownload(scene)} className="p-3 bg-white/90 backdrop-blur rounded-full text-slate-900 hover:text-highlight shadow-md transition-transform hover:scale-110" title="Download Image" aria-label="Download Image"><Download size={20} /></button>
                                     </div>
-                                    <div className="absolute bottom-6 left-0 right-0 flex items-center justify-center gap-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="absolute bottom-6 left-0 right-0 flex items-center justify-center gap-2 z-20 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                                         <button onClick={() => handleGenerateImage(scene)} disabled={scene.isLocked} className="bg-highlight hover:bg-orange-700 text-white px-4 py-2 rounded-full text-xs font-bold shadow-lg flex items-center gap-2 hover:scale-105 transition-all backdrop-blur-sm"><RefreshCw size={14}/> Re-generate</button>
                                     </div>
                                 </>
@@ -1859,8 +1868,8 @@ const Storyboard: React.FC<Props> = ({ project, setProject, jackState, setJackSt
                                 <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 gap-2 relative z-10 p-4">
                                     {scene.isGenerating ? (
                                         <div className="flex flex-col items-center gap-2">
-                                            <Loader2 className="animate-spin text-highlight" size={32} />
-                                            <span className="text-xs font-bold">Drawing...</span>
+                                            <Loader2 className="animate-spin text-[#D66A3A]" size={32} aria-hidden="true" />
+                                            <span className="text-xs font-bold text-[#7A5A3F]" role="status" aria-live="polite">Drawing scene {scene.number}...</span>
                                             <button onClick={(e) => { e.stopPropagation(); updateScene(scene.id, { isGenerating: false }); }} className="text-[10px] text-red-400 hover:text-red-500 font-bold underline mt-2">Stuck? Reset</button>
                                         </div>
                                     ) : (
@@ -1899,7 +1908,7 @@ const Storyboard: React.FC<Props> = ({ project, setProject, jackState, setJackSt
                                                 </button>
                                             )}
 
-                                            <button onClick={() => handleResetAudio(scene.id)} disabled={scene.isLocked} className="text-red-400 hover:text-red-600 bg-red-50 dark:bg-red-900/20 p-1.5 rounded disabled:opacity-50" title="Delete Audio"><Trash2 size={14}/></button>
+                                            <button onClick={() => handleResetAudio(scene.id)} disabled={scene.isLocked} className="text-red-400 hover:text-red-600 bg-red-50 dark:bg-red-900/20 p-1.5 rounded disabled:opacity-50" title="Delete Audio" aria-label="Delete Audio"><Trash2 size={14}/></button>
                                         </>
                                     ) : (
                                         <label className={`cursor-pointer bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 px-3 py-1.5 rounded text-[10px] font-bold flex items-center gap-1 shadow-sm transition-all active:scale-95 ${scene.isLocked ? 'opacity-50 pointer-events-none' : ''}`}>
@@ -2039,6 +2048,7 @@ const Storyboard: React.FC<Props> = ({ project, setProject, jackState, setJackSt
       
       {/* Modals and Overlays */}
       {editingScene && (
+        <React.Suspense fallback={null}>
         <ImageEditModal 
           isOpen={!!editingScene} 
           onClose={() => setEditingScene(null)} 
@@ -2046,9 +2056,12 @@ const Storyboard: React.FC<Props> = ({ project, setProject, jackState, setJackSt
           aspectRatio={project.aspectRatio}
           onUpdateImage={(id, img) => updateScene(id, { imageUrl: img })} 
         />
+        </React.Suspense>
       )}
       
       {/* Voice Selector Modal */}
+      {showVoiceSelector && (
+      <React.Suspense fallback={null}>
       <VoiceSelectorModal
           isOpen={showVoiceSelector}
           onClose={() => setShowVoiceSelector(false)}
@@ -2056,6 +2069,8 @@ const Storyboard: React.FC<Props> = ({ project, setProject, jackState, setJackSt
           currentConfig={project.genAiProConfig || {} as any}
           onSelectVoice={handleVoiceSelected}
       />
+      </React.Suspense>
+      )}
 
       {showFloatingSearch && (
           <div className="fixed inset-0 z-50 flex items-start justify-center pt-32 bg-slate-900/20 backdrop-blur-sm" onClick={() => setShowFloatingSearch(false)}>
