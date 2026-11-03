@@ -102,6 +102,22 @@ const generatePromptsFile = (project: ProjectState) => {
 
 // --- Helper Functions ---
 
+const MIME_EXT: Record<string, string> = {
+    'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/svg+xml': 'svg',
+    'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov',
+    'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav', 'audio/mpeg': 'mp3', 'audio/mp3': 'mp3',
+    'audio/ogg': 'ogg', 'audio/webm': 'webm', 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/flac': 'flac',
+};
+/** File extension from the blob's real MIME type, so a WAV isn't saved as .mp3 (or vice versa). */
+const extFor = (blob: Blob, fallback: string): string => MIME_EXT[(blob.type || '').split(';')[0].trim().toLowerCase()] || fallback;
+
+/** Short, credential-free description of a URL for logs. */
+const describeUrl = (url: string): string => {
+    if (!url) return '(empty)';
+    if (url.startsWith('data:')) return url.substring(0, url.indexOf(',') > 0 ? Math.min(url.indexOf(','), 40) : 40);
+    try { const u = new URL(url); return `${u.protocol}//${u.host}${u.pathname}`.substring(0, 80); } catch { return url.substring(0, 20); }
+};
+
 async function fetchBlob(url: string): Promise<Blob> {
   try {
     if (!url) return new Blob([], { type: 'application/octet-stream' });
@@ -125,9 +141,9 @@ async function fetchBlob(url: string): Promise<Blob> {
         return await res.blob();
     }
     
-    throw new Error(`Unsupported URL type: ${url.substring(0, 20)}`);
+    throw new Error(`Unsupported URL type: ${describeUrl(url)}`);
   } catch (err) {
-    console.error('fetchBlob failed:', url.substring(0, 50), err);
+    console.error('fetchBlob failed:', describeUrl(url), (err as Error)?.message || err);
     return new Blob([], { type: 'application/octet-stream' });
   }
 }
@@ -145,7 +161,7 @@ export const exportPromptsToText = (project: ProjectState): Blob => {
 export const exportProjectToZip = async (project: ProjectState): Promise<Blob> => {
     // 1. Initialize Zip
     const zip = new JSZip();
-    const safeTopic = (project.topic || 'Project').replace(/[^a-z0-9]/gi, '_');
+    const safeTopic = ((project.topic || 'Project').replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').substring(0, 60)) || 'Project';
     const folderName = `${safeTopic}_Backup`;
     const root = zip.folder(folderName);
     
@@ -168,37 +184,40 @@ export const exportProjectToZip = async (project: ProjectState): Promise<Blob> =
     // 4. Batch Process Scenes
     console.log('Starting backup export with', project.scenes.length, 'scenes');
     const BATCH_SIZE = 3;
+    const seenNumbers = new Set<number>();
 
     for (let i = 0; i < project.scenes.length; i += BATCH_SIZE) {
         const batch = project.scenes.slice(i, i + BATCH_SIZE);
         console.log(`Processing scene batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(project.scenes.length/BATCH_SIZE)}`);
         
-        await Promise.all(batch.map(async (scene) => {
-            const num = String(scene.number).padStart(3, '0');
+        await Promise.all(batch.map(async (scene, j) => {
+            // Use position as a fallback so duplicate/missing scene numbers don't overwrite files.
+            const num = String(Number.isFinite(scene.number) ? scene.number : i + j + 1).padStart(3, '0') + (seenNumbers.has(scene.number) ? `_${i + j + 1}` : '');
+            seenNumbers.add(scene.number);
             
             try {
                 // Image
                 if (scene.imageUrl && fImages) {
                     const blob = await fetchBlob(scene.imageUrl);
-                    if (blob.size > 0) fImages.file(`Scene_${num}_Image.png`, blob);
+                    if (blob.size > 0) fImages.file(`Scene_${num}_Image.${extFor(blob, 'png')}`, blob);
                 }
 
                 // Video
                 if (scene.type === 'video' && scene.videoUrl && fVideos) {
                     const blob = await fetchBlob(scene.videoUrl);
-                    if (blob.size > 0) fVideos.file(`Scene_${num}_Video.mp4`, blob);
+                    if (blob.size > 0) fVideos.file(`Scene_${num}_Video.${extFor(blob, 'mp4')}`, blob);
                 }
 
                 // Audio (Narration)
                 if (scene.audioUrl && fAudio) {
                     const blob = await fetchBlob(scene.audioUrl);
-                    if (blob.size > 0) fAudio.file(`Scene_${num}_Narration.wav`, blob);
+                    if (blob.size > 0) fAudio.file(`Scene_${num}_Narration.${extFor(blob, 'wav')}`, blob);
                 }
 
                 // SFX
                 if (scene.sfxUrl && fAudio) {
                     const blob = await fetchBlob(scene.sfxUrl);
-                    if (blob.size > 0) fAudio.file(`Scene_${num}_SFX.mp3`, blob);
+                    if (blob.size > 0) fAudio.file(`Scene_${num}_SFX.${extFor(blob, 'mp3')}`, blob);
                 }
             } catch (error) {
                 console.warn(`Failed to export assets for scene ${scene.id}:`, error);
@@ -210,11 +229,11 @@ export const exportProjectToZip = async (project: ProjectState): Promise<Blob> =
     try {
         if (project.musicUrl && fAudio) {
             const blob = await fetchBlob(project.musicUrl);
-            if (blob.size > 0) fAudio.file("Background_Music.mp3", blob);
+            if (blob.size > 0) fAudio.file(`Background_Music.${extFor(blob, 'mp3')}`, blob);
         }
         if (project.globalSfxUrl && fAudio) {
             const blob = await fetchBlob(project.globalSfxUrl);
-            if (blob.size > 0) fAudio.file("Global_SFX.mp3", blob);
+            if (blob.size > 0) fAudio.file(`Global_SFX.${extFor(blob, 'mp3')}`, blob);
         }
     } catch (e) {
         console.warn("Failed to export global assets", e);

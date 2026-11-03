@@ -40,15 +40,15 @@ if not exist "node_modules" (
 :: Check for .env.local
 if not exist ".env.local" (
     echo [CONFIG] Creating default .env.local file...
-    echo API_KEY=YOUR_GEMINI_API_KEY_HERE > .env.local
+    copy .env.example .env.local >nul
     color 0E
     echo.
-    echo [WARNING] Please edit .env.local and add your Gemini API key!
+    echo [WARNING] Please edit .env.local and add GEMINI_API_KEY and GENAIPRO_JWT!
     echo.
 )
 
 :: Start CORS Proxy in a new window
-echo [STARTING] CORS Proxy Server (Port 3001)...
+echo [STARTING] CORS Proxy Server (Port 3002)...
 start "ÜberDoodle - CORS Proxy" cmd /k "node cors-proxy.mjs"
 
 :: Give the proxy time to start

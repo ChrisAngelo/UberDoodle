@@ -71,6 +71,11 @@ class DoodleMindsAI:
         self.location = location or os.getenv("GCP_LOCATION", "us-central1")
         self.model_name = os.getenv("MODEL_NAME", "gemini-1.5-pro")
 
+        if not VERTEXAI_AVAILABLE:
+            self.error = "vertexai SDK not installed"
+            self.model = None
+            return
+
         try:
             # CASE 1: Partner provides credentials JSON
             if credentials_json:
@@ -78,6 +83,8 @@ class DoodleMindsAI:
                     creds_dict = json.loads(credentials_json)
                 else:
                     creds_dict = credentials_json
+                if not isinstance(creds_dict, dict) or creds_dict.get("type") != "service_account":
+                    raise ValueError("credentials_json must be a service_account JSON object")
 
                 credentials = service_account.Credentials.from_service_account_info(creds_dict)
 

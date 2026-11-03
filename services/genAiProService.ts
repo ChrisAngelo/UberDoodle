@@ -6,15 +6,43 @@ import { GenAiProConfig } from "../types";
 // =============================================================================
 
 // --- API KEYS ---
-const LMNT_API_KEY = "ak_A6BZWJERjYdpUC4szTz2Jr";
-const ELEVENLABS_API_KEY = "cc487b8cbd72fa70219667f381997df51eac0cb19de27d02dc2206bc098f72f3";
-const GENAIPRO_JWT = "eyJhbGciOiJSUzI1NiIsImNhdCI6ImNsX0I3ZDRQRDIyMkFBQSIsImtpZCI6Imluc18ydmlCa3pCZzdVUUJ4eW9FTHh4WmN4Q1FWc0MiLCJ0eXAiOiJKV1QifQ.eyJhenAiOiJodHRwczovL2dlbmFpcHJvLnZuIiwiZXhwIjoxNzY4ODQyNzA3LCJpYXQiOjE3NjEwNjY3MDcsImlzcyI6Imh0dHBzOi8vY2xlcmsuZ2VuYWlwcm8udm4iLCJqdGkiOiI4NGM4YTQyMDU5YmE3YTU2MjY1OCIsIm5iZiI6MTc2MTA2NjcwMiwicHVibGljX21ldGFkYXRhIjp7ImNoYXRncHRfYWNjb3VudF9pZCI6IjI0N2E3ZWIxLTIxODktNDg4NS05YTU0LTUxNDA1MjFlOGNlNCIsInJvbGUiOiJ1c2VyIiwidXNlcl9kYl9pZCI6IjYzMmMyNmRlLTUxMGMtNDMwYy1iZDJkLWRkMDcxYmMwNjFiYyIsInZlb19hY2NvdW50X2lkIjoiM2IwODBlNzgtODIyOC00N2FlLTk4ZmItYTIxYmJiZjc0OGExIiwidmVvX3N1YnNjcmlwdGlvbl9lbmRfZGF0ZSI6IjIwMjUtMTAtMjJUMTg6NTE6NDIrMDc6MDAifSwic3ViIjoidXNlcl8zNExQdUJSZm1WdU9aa1dMMzN6ZmN4YUZhMWoiLCJ1c2VybmFtZSI6ImNocmlzYW5nZWxvIn0.RTFyhr9F3TZqMHKWlgw-7WzZq4NGgfKFKc6CuLDFfqKXcs8GAk1pE6jjFF_x7QMBCZMGlD7vsR0_h2tGkRBE-KX_zeW59-RlHSP1kPHqWzCubMFwX2uT3HFuAj7HRxWlDJqKoXNepwc8qvTHykiBs9d_pCO91oZk3ZtXG8bJkPQlg-UMUWWRQfhzBc7AeIwNHoknNxB3aVwz2VWyEjJSJBaRDpe45I0K8Uc4E_jU0PEWV4QMR9UD9iriny-xijBRpbVltIKlMSLbVNO0IJBLZTKh5Sl_1Tn_2olb-QbyGyogrdENV5yZsRVIFxSIsbrEUNBxN5BIxkajxW2u7Mhzkg";
+// SECURITY: keys are read from Vite env (.env.local) and never hardcoded or logged.
+// Anything prefixed VITE_ is shipped to the browser; prefer routing via the local proxy.
+const ENV: Record<string, string | undefined> = ((import.meta as any).env || {}) as Record<string, string | undefined>;
+const LMNT_API_KEY = ENV.VITE_LMNT_API_KEY || "";
+const ELEVENLABS_API_KEY = ENV.VITE_ELEVENLABS_API_KEY || "";
+const GENAIPRO_JWT = ENV.VITE_GENAIPRO_JWT || "";
 
 // --- API URLS ---
 const LMNT_API_URL = "https://api.lmnt.com/v1/ai/speech";
 const ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1";
 const GENAIPRO_API_URL = "https://genaipro.vn/api/v1";
-const LOCAL_PROXY_URL = "http://localhost:3002/proxy";
+const LOCAL_PROXY_URL = ENV.VITE_TTS_PROXY_URL || "http://localhost:3002/proxy";
+
+// --- NETWORK HELPERS ---
+const RETRYABLE = (status: number) => status === 429 || status >= 500;
+
+/** fetch with AbortController timeout and exponential backoff + jitter on 429/5xx/network errors. */
+async function fetchWithRetry(url: string, init: RequestInit = {}, opts: { timeoutMs?: number; retries?: number } = {}): Promise<Response> {
+    const { timeoutMs = 30_000, retries = 2 } = opts;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const res = await fetch(url, { ...init, signal: controller.signal });
+            if (!RETRYABLE(res.status) || attempt === retries) return res;
+            lastErr = new Error(`HTTP ${res.status}`);
+        } catch (e: any) {
+            lastErr = e?.name === 'AbortError' ? new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`) : e;
+            if (attempt === retries) throw lastErr;
+        } finally {
+            clearTimeout(timer);
+        }
+        await new Promise(r => setTimeout(r, Math.random() * Math.min(10_000, 1000 * 2 ** attempt)));
+    }
+    throw lastErr;
+}
 
 // --- LMNT VOICE IDS ---
 export const LMNT_VOICES = {
@@ -60,8 +88,9 @@ export interface VoiceFilterParams {
 export const generateLMNTSpeech = async (text: string, voiceId: string, speed: number = 1.0): Promise<string> => {
     console.log(`[LMNT] Generating speech with voice: ${voiceId}`);
     
+    if (!LMNT_API_KEY) throw new Error('LMNT API key missing (set VITE_LMNT_API_KEY)');
     try {
-        const response = await fetch(LMNT_API_URL, {
+        const response = await fetchWithRetry(LMNT_API_URL, {
             method: 'POST',
             headers: {
                 'X-API-Key': LMNT_API_KEY,
@@ -73,7 +102,7 @@ export const generateLMNTSpeech = async (text: string, voiceId: string, speed: n
                 speed: speed,
                 format: 'mp3'
             })
-        });
+        }, { timeoutMs: 60_000 });
         
         if (!response.ok) {
             throw new Error(`LMNT API Error: ${response.status}`);
@@ -109,14 +138,15 @@ export const generateElevenLabsSpeech = async (
             }
         };
         
-        const response = await fetch(`${ELEVENLABS_API_URL}/text-to-speech/${voiceId}`, {
+        if (!ELEVENLABS_API_KEY) throw new Error('ElevenLabs API key missing (set VITE_ELEVENLABS_API_KEY)');
+        const response = await fetchWithRetry(`${ELEVENLABS_API_URL}/text-to-speech/${encodeURIComponent(voiceId)}`, {
             method: 'POST',
             headers: {
                 'xi-api-key': ELEVENLABS_API_KEY,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify(payload)
-        });
+        }, { timeoutMs: 60_000 });
         
         if (!response.ok) {
             throw new Error(`ElevenLabs API Error: ${response.status}`);
@@ -143,7 +173,7 @@ export const generateGenAiProSpeech = async (
     
     try {
         // Step 1: Create TTS task via proxy
-        const createResponse = await fetch(`${LOCAL_PROXY_URL}/genaipro/labs/task`, {
+        const createResponse = await fetchWithRetry(`${LOCAL_PROXY_URL}/genaipro/labs/task`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -160,19 +190,25 @@ export const generateGenAiProSpeech = async (
         
         if (!createResponse.ok) {
             const errText = await createResponse.text();
-            console.error(`[GenAiPro] Task creation failed: ${createResponse.status} - ${errText}`);
+            console.error(`[GenAiPro] Task creation failed: ${createResponse.status} - ${errText.slice(0, 200)}`);
             throw new Error(`GenAiPro task creation failed: ${createResponse.status}`);
         }
         
         const createData = await createResponse.json();
         const taskId = createData.task_id;
+        if (!taskId) throw new Error('GenAiPro task creation returned no task_id');
         console.log(`[GenAiPro] Task created: ${taskId}`);
         
         // Step 2: Poll for completion (max 2 minutes)
         for (let attempt = 0; attempt < 60; attempt++) {
             await new Promise(r => setTimeout(r, 2000));
             
-            const statusResponse = await fetch(`${LOCAL_PROXY_URL}/genaipro/labs/task/${taskId}`);
+            let statusResponse: Response;
+            try {
+                statusResponse = await fetchWithRetry(`${LOCAL_PROXY_URL}/genaipro/labs/task/${encodeURIComponent(taskId)}`, {}, { timeoutMs: 15_000, retries: 1 });
+            } catch {
+                continue; // transient poll failure; keep polling until deadline
+            }
             
             if (statusResponse.ok) {
                 const statusData = await statusResponse.json();
@@ -180,12 +216,11 @@ export const generateGenAiProSpeech = async (
                 
                 if (statusData.status === 'completed' && statusData.result) {
                     // Step 3: Fetch audio file via proxy
-                    const audioResponse = await fetch(`${LOCAL_PROXY_URL}/fetch-audio?url=${encodeURIComponent(statusData.result)}`);
-                    if (audioResponse.ok) {
-                        const blob = await audioResponse.blob();
-                        console.log(`[GenAiPro] Audio received: ${blob.size} bytes`);
-                        return await blobToDataUri(blob);
-                    }
+                    const audioResponse = await fetchWithRetry(`${LOCAL_PROXY_URL}/fetch-audio?url=${encodeURIComponent(statusData.result)}`, {}, { timeoutMs: 60_000 });
+                    if (!audioResponse.ok) throw new Error(`GenAiPro audio download failed: ${audioResponse.status}`);
+                    const blob = await audioResponse.blob();
+                    console.log(`[GenAiPro] Audio received: ${blob.size} bytes`);
+                    return await blobToDataUri(blob);
                 } else if (statusData.status === 'failed') {
                     throw new Error('GenAiPro task failed: ' + (statusData.error || 'Unknown error'));
                 }
@@ -216,7 +251,7 @@ export const fetchGenAiProVoices = async (filters: VoiceFilterParams = {}): Prom
         if (filters.age) params.append('age', filters.age);
         if (filters.category) params.append('category', filters.category);
         
-        const response = await fetch(`${LOCAL_PROXY_URL}/genaipro/labs/voices?${params.toString()}`);
+        const response = await fetchWithRetry(`${LOCAL_PROXY_URL}/genaipro/labs/voices?${params.toString()}`, {}, { timeoutMs: 15_000, retries: 1 });
         
         if (response.ok) {
             const data = await response.json();
@@ -238,10 +273,11 @@ export const fetchGenAiProVoices = async (filters: VoiceFilterParams = {}): Prom
 export const fetchElevenLabsVoices = async (): Promise<LabVoice[]> => {
     console.log('[ElevenLabs] Fetching voices directly...');
     
+    if (!ELEVENLABS_API_KEY) return [];
     try {
-        const response = await fetch(`${ELEVENLABS_API_URL}/voices`, {
+        const response = await fetchWithRetry(`${ELEVENLABS_API_URL}/voices`, {
             headers: { 'xi-api-key': ELEVENLABS_API_KEY }
-        });
+        }, { timeoutMs: 15_000, retries: 1 });
         
         if (response.ok) {
             const data = await response.json();
@@ -370,7 +406,7 @@ const blobToDataUri = (blob: Blob): Promise<string> => {
 // =============================================================================
 export const checkProxyStatus = async (): Promise<boolean> => {
     try {
-        const response = await fetch(`${LOCAL_PROXY_URL}/health`);
+        const response = await fetchWithRetry(`${LOCAL_PROXY_URL}/health`, {}, { timeoutMs: 3_000, retries: 0 });
         return response.ok;
     } catch {
         return false;

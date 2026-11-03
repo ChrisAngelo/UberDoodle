@@ -1,285 +1,188 @@
 /**
- * =============================================================================
- * DOODLEMINDS STUDIO - SUPER CORS PROXY SERVER
- * =============================================================================
- * 
- * This Node.js server runs locally and acts as a proxy for GenAiPro API.
- * It bypasses all CORS restrictions and browser blocks by making server-side
- * requests to GenAiPro's API.
- * 
- * Features:
- * - Proxies all GenAiPro API endpoints (/labs/voices, /labs/task, etc.)
- * - Fetches audio files from GenAiPro CDN
- * - Full CORS headers for browser compatibility
- * - WebSocket support for real-time task updates
- * - Health check endpoint
- * 
- * Run with: node cors-proxy.mjs
+ * UberDoodle / DoodleMinds Studio - local CORS proxy for the GenAiPro API.
+ *
+ * Hardened:
+ *  - Binds to 127.0.0.1 only (override with PROXY_HOST at your own risk).
+ *  - NOT an open relay: /proxy/genaipro/* only forwards to GENAIPRO_API_URL, and
+ *    /proxy/fetch-audio only fetches https URLs whose host is in AUDIO_HOST_ALLOWLIST.
+ *  - CORS restricted to localhost dev origins (PROXY_ALLOWED_ORIGINS).
+ *  - Request body limit (1 MB) and upstream response limit (50 MB), timeouts.
+ *  - Bearer token read from env GENAIPRO_JWT (never hardcode secrets).
+ *
+ * Run: GENAIPRO_JWT=... node cors-proxy.mjs   (or put it in .env.local)
  */
+import http from 'node:http';
+import https from 'node:https';
+import fs from 'node:fs';
+import { URL } from 'node:url';
 
-import http from 'http';
-import https from 'https';
-import { URL } from 'url';
-
-const PORT = 3002;
-
-// GenAiPro Configuration
-const GENAIPRO_API_URL = "https://genaipro.vn/api/v1";
-const GENAIPRO_JWT = "eyJhbGciOiJSUzI1NiIsImNhdCI6ImNsX0I3ZDRQRDIyMkFBQSIsImtpZCI6Imluc18ydmlCa3pCZzdVUUJ4eW9FTHh4WmN4Q1FWc0MiLCJ0eXAiOiJKV1QifQ.eyJhenAiOiJodHRwczovL2dlbmFpcHJvLnZuIiwiZXhwIjoxNzY4ODQyNzA3LCJpYXQiOjE3NjEwNjY3MDcsImlzcyI6Imh0dHBzOi8vY2xlcmsuZ2VuYWlwcm8udm4iLCJqdGkiOiI4NGM4YTQyMDU5YmE3YTU2MjY1OCIsIm5iZiI6MTc2MTA2NjcwMiwicHVibGljX21ldGFkYXRhIjp7ImNoYXRncHRfYWNjb3VudF9pZCI6IjI0N2E3ZWIxLTIxODktNDg4NS05YTU0LTUxNDA1MjFlOGNlNCIsInJvbGUiOiJ1c2VyIiwidXNlcl9kYl9pZCI6IjYzMmMyNmRlLTUxMGMtNDMwYy1iZDJkLWRkMDcxYmMwNjFiYyIsInZlb19hY2NvdW50X2lkIjoiM2IwODBlNzgtODIyOC00N2FlLTk4ZmItYTIxYmJiZjc0OGExIiwidmVvX3N1YnNjcmlwdGlvbl9lbmRfZGF0ZSI6IjIwMjUtMTAtMjJUMTg6NTE6NDIrMDc6MDAifSwic3ViIjoidXNlcl8zNExQdUJSZm1WdU9aa1dMMzN6ZmN4YUZhMWoiLCJ1c2VybmFtZSI6ImNocmlzYW5nZWxvIn0.RTFyhr9F3TZqMHKWlgw-7WzZq4NGgfKFKc6CuLDFfqKXcs8GAk1pE6jjFF_x7QMBCZMGlD7vsR0_h2tGkRBE-KX_zeW59-RlHSP1kPHqWzCubMFwX2uT3HFuAj7HRxWlDJqKoXNepwc8qvTHykiBs9d_pCO91oZk3ZtXG8bJkPQlg-UMUWWRQfhzBc7AeIwNHoknNxB3aVwz2VWyEjJSJBaRDpe45I0K8Uc4E_jU0PEWV4QMR9UD9iriny-xijBRpbVltIKlMSLbVNO0IJBLZTKh5Sl_1Tn_2olb-QbyGyogrdENV5yZsRVIFxSIsbrEUNBxN5BIxkajxW2u7Mhzkg";
-
-console.log(`
-╔═══════════════════════════════════════════════════════════════════════════╗
-║                                                                           ║
-║         🔧 DOODLEMINDS STUDIO - SUPER CORS PROXY SERVER 🔧                ║
-║                                                                           ║
-╠═══════════════════════════════════════════════════════════════════════════╣
-║                                                                           ║
-║   This proxy server enables GenAiPro API access from the browser.         ║
-║   It bypasses CORS restrictions by making server-side requests.           ║
-║                                                                           ║
-║   Endpoints:                                                              ║
-║   • GET  /proxy/health          - Health check                            ║
-║   • GET  /proxy/genaipro/*      - Proxy GenAiPro GET requests             ║
-║   • POST /proxy/genaipro/*      - Proxy GenAiPro POST requests            ║
-║   • GET  /proxy/fetch-audio     - Fetch audio from GenAiPro CDN           ║
-║                                                                           ║
-║   Server running at: http://localhost:${PORT}                               ║
-║                                                                           ║
-╚═══════════════════════════════════════════════════════════════════════════╝
-`);
-
-// Add CORS headers to response
-const addCorsHeaders = (res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', '*');
-    res.setHeader('Access-Control-Expose-Headers', '*');
-};
-
-// Make HTTPS request and return Promise
-const makeRequest = (options, postData = null) => {
-    return new Promise((resolve, reject) => {
-        const protocol = options.protocol === 'http:' ? http : https;
-        
-        const req = protocol.request(options, (res) => {
-            const chunks = [];
-            res.on('data', chunk => chunks.push(chunk));
-            res.on('end', () => {
-                const body = Buffer.concat(chunks);
-                resolve({
-                    statusCode: res.statusCode,
-                    headers: res.headers,
-                    body: body
-                });
-            });
-        });
-        
-        req.on('error', reject);
-        req.setTimeout(120000, () => {
-            req.destroy();
-            reject(new Error('Request timeout'));
-        });
-        
-        if (postData) {
-            req.write(postData);
-        }
-        req.end();
-    });
-};
-
-// Proxy request to GenAiPro
-const proxyToGenAiPro = async (req, res, apiPath, method, body = null) => {
+// Minimal .env.local / .env loader (no dependency); real env vars win.
+for (const f of ['.env.local', '.env']) {
     try {
-        const targetUrl = new URL(`${GENAIPRO_API_URL}${apiPath}`);
-        
-        // Add query params if present
-        const reqUrl = new URL(req.url, `http://localhost:${PORT}`);
-        reqUrl.searchParams.forEach((value, key) => {
-            if (key !== 'url') {
-                targetUrl.searchParams.append(key, value);
-            }
-        });
-        
-        console.log(`[PROXY] ${method} ${targetUrl.toString()}`);
-        
-        const options = {
-            hostname: targetUrl.hostname,
-            port: 443,
-            path: targetUrl.pathname + targetUrl.search,
-            method: method,
-            protocol: 'https:',
-            headers: {
-                'Authorization': `Bearer ${GENAIPRO_JWT}`,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'User-Agent': 'DoodleMinds-Studio-Proxy/1.0'
-            }
-        };
-        
-        if (body && method === 'POST') {
-            const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
-            options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
+        for (const line of fs.readFileSync(f, 'utf8').split(/\r?\n/)) {
+            const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i);
+            if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
         }
-        
-        const response = await makeRequest(options, body ? (typeof body === 'string' ? body : JSON.stringify(body)) : null);
-        
-        addCorsHeaders(res);
-        res.writeHead(response.statusCode, {
-            'Content-Type': response.headers['content-type'] || 'application/json'
-        });
-        res.end(response.body);
-        
-        console.log(`[PROXY] Response: ${response.statusCode}`);
-        
-    } catch (error) {
-        console.error(`[PROXY ERROR] ${error.message}`);
-        addCorsHeaders(res);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: error.message }));
-    }
+    } catch { /* file absent */ }
+}
+
+const PORT = Number(process.env.PROXY_PORT || 3002);
+const HOST = process.env.PROXY_HOST || '127.0.0.1';
+const GENAIPRO_API_URL = new URL(process.env.GENAIPRO_API_URL || 'https://genaipro.vn/api/v1');
+const GENAIPRO_JWT = process.env.GENAIPRO_JWT || '';
+const MAX_BODY_BYTES = 1 * 1024 * 1024;
+const MAX_RESPONSE_BYTES = 50 * 1024 * 1024;
+const TIMEOUT_MS = 120_000;
+
+const AUDIO_HOST_ALLOWLIST = (process.env.AUDIO_HOST_ALLOWLIST ||
+    'genaipro.vn,*.genaipro.vn,storage.googleapis.com,*.r2.dev,*.cloudfront.net')
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
+const ALLOWED_ORIGINS = (process.env.PROXY_ALLOWED_ORIGINS ||
+    'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://localhost:4173')
+    .split(',').map(s => s.trim()).filter(Boolean);
+
+if (!GENAIPRO_JWT) {
+    console.warn('[WARN] GENAIPRO_JWT is not set - /proxy/genaipro/* requests will be rejected upstream.');
+}
+
+const hostAllowed = (hostname) => {
+    const h = hostname.toLowerCase();
+    return AUDIO_HOST_ALLOWLIST.some(p => p.startsWith('*.') ? h.endsWith(p.slice(1)) : h === p);
 };
 
-// Fetch audio file from URL
-const fetchAudioFile = async (audioUrl, res) => {
-    try {
-        console.log(`[AUDIO FETCH] ${audioUrl}`);
-        
-        const url = new URL(audioUrl);
-        
-        const options = {
-            hostname: url.hostname,
-            port: url.port || 443,
-            path: url.pathname + url.search,
-            method: 'GET',
-            protocol: url.protocol,
-            headers: {
-                'User-Agent': 'DoodleMinds-Studio-Proxy/1.0',
-                'Accept': '*/*'
-            }
-        };
-        
-        const response = await makeRequest(options);
-        
-        addCorsHeaders(res);
-        res.writeHead(response.statusCode, {
-            'Content-Type': response.headers['content-type'] || 'audio/mpeg',
-            'Content-Length': response.headers['content-length']
-        });
-        res.end(response.body);
-        
-        console.log(`[AUDIO FETCH] Success: ${response.body.length} bytes`);
-        
-    } catch (error) {
-        console.error(`[AUDIO FETCH ERROR] ${error.message}`);
-        addCorsHeaders(res);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: error.message }));
+const addCorsHeaders = (req, res) => {
+    const origin = req.headers.origin;
+    if (origin && ALLOWED_ORIGINS.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
     }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
 };
 
-// Collect request body
-const getRequestBody = (req) => {
-    return new Promise((resolve) => {
+const sendJson = (req, res, status, obj) => {
+    addCorsHeaders(req, res);
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(obj));
+};
+
+class HttpError extends Error {
+    constructor(status, message) { super(message); this.status = status; }
+}
+
+const makeRequest = (targetUrl, method, headers, postData = null) => new Promise((resolve, reject) => {
+    if (targetUrl.protocol !== 'https:') return reject(new HttpError(400, 'Only https upstreams are allowed'));
+    const req = https.request(targetUrl, { method, headers }, (up) => {
         const chunks = [];
-        req.on('data', chunk => chunks.push(chunk));
-        req.on('end', () => resolve(Buffer.concat(chunks).toString()));
+        let size = 0;
+        up.on('data', (c) => {
+            size += c.length;
+            if (size > MAX_RESPONSE_BYTES) {
+                up.destroy();
+                reject(new HttpError(502, 'Upstream response too large'));
+                return;
+            }
+            chunks.push(c);
+        });
+        up.on('end', () => resolve({ statusCode: up.statusCode || 502, headers: up.headers, body: Buffer.concat(chunks) }));
+        up.on('error', reject);
     });
+    req.on('error', reject);
+    req.setTimeout(TIMEOUT_MS, () => req.destroy(new HttpError(504, 'Upstream timeout')));
+    if (postData) req.write(postData);
+    req.end();
+});
+
+const getRequestBody = (req) => new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+        size += c.length;
+        if (size > MAX_BODY_BYTES) { reject(new HttpError(413, 'Request body too large')); req.destroy(); return; }
+        chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+});
+
+const proxyToGenAiPro = async (req, res, apiPath, method, body = null) => {
+    // Only simple path segments; blocks traversal / host smuggling.
+    if (!/^\/[A-Za-z0-9._~\-/]*$/.test(apiPath) || apiPath.includes('..') || apiPath.includes('//')) {
+        throw new HttpError(400, 'Invalid API path');
+    }
+    const target = new URL(GENAIPRO_API_URL.href.replace(/\/$/, '') + apiPath);
+    if (target.origin !== GENAIPRO_API_URL.origin) throw new HttpError(400, 'Invalid target');
+    new URL(req.url, 'http://localhost').searchParams.forEach((v, k) => {
+        if (k !== 'url') target.searchParams.append(k, v);
+    });
+    const headers = {
+        'Authorization': `Bearer ${GENAIPRO_JWT}`,
+        'Accept': 'application/json',
+        'User-Agent': 'DoodleMinds-Studio-Proxy/1.1',
+    };
+    if (body !== null) {
+        headers['Content-Type'] = 'application/json';
+        headers['Content-Length'] = Buffer.byteLength(body);
+    }
+    console.log(`[PROXY] ${method} ${target.pathname}`);
+    const up = await makeRequest(target, method, headers, body);
+    addCorsHeaders(req, res);
+    res.writeHead(up.statusCode, { 'Content-Type': up.headers['content-type'] || 'application/json' });
+    res.end(up.body);
 };
 
-// Create HTTP server
-const server = http.createServer(async (req, res) => {
-    // Handle preflight
-    if (req.method === 'OPTIONS') {
-        addCorsHeaders(res);
-        res.writeHead(204);
-        res.end();
-        return;
-    }
-    
-    const reqUrl = new URL(req.url, `http://localhost:${PORT}`);
-    const pathname = reqUrl.pathname;
-    
-    console.log(`[REQUEST] ${req.method} ${pathname}`);
-    
-    // Health check
-    if (pathname === '/proxy/health') {
-        addCorsHeaders(res);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ 
-            status: 'ok', 
-            timestamp: new Date().toISOString(),
-            version: '1.0.0'
-        }));
-        return;
-    }
-    
-    // Fetch audio file
-    if (pathname === '/proxy/fetch-audio') {
-        const audioUrl = reqUrl.searchParams.get('url');
-        if (!audioUrl) {
-            addCorsHeaders(res);
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Missing url parameter' }));
-            return;
-        }
-        await fetchAudioFile(audioUrl, res);
-        return;
-    }
-    
-    // GenAiPro API proxy
-    if (pathname.startsWith('/proxy/genaipro/')) {
-        const apiPath = pathname.replace('/proxy/genaipro', '');
-        
-        if (req.method === 'GET') {
-            await proxyToGenAiPro(req, res, apiPath, 'GET');
-        } else if (req.method === 'POST') {
-            const body = await getRequestBody(req);
-            await proxyToGenAiPro(req, res, apiPath, 'POST', body);
-        } else if (req.method === 'DELETE') {
-            await proxyToGenAiPro(req, res, apiPath, 'DELETE');
-        } else {
-            addCorsHeaders(res);
-            res.writeHead(405, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Method not allowed' }));
-        }
-        return;
-    }
-    
-    // Legacy simple proxy (for backwards compatibility)
-    if (pathname === '/') {
-        const targetUrl = reqUrl.searchParams.get('url');
-        if (targetUrl) {
-            await fetchAudioFile(targetUrl, res);
-            return;
-        }
-    }
-    
-    // 404 for unknown routes
-    addCorsHeaders(res);
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ 
-        error: 'Not found',
-        availableEndpoints: [
-            '/proxy/health',
-            '/proxy/genaipro/*',
-            '/proxy/fetch-audio?url=...'
-        ]
-    }));
-});
-
-server.listen(PORT, () => {
-    console.log(`\n✅ Proxy server is running on http://localhost:${PORT}`);
-    console.log(`\n📝 Test endpoints:`);
-    console.log(`   curl http://localhost:${PORT}/proxy/health`);
-    console.log(`   curl http://localhost:${PORT}/proxy/genaipro/labs/voices`);
-    console.log(`\n🎤 GenAiPro voice search is now available!`);
-});
-
-// Handle shutdown
-process.on('SIGINT', () => {
-    console.log('\n\n👋 Shutting down proxy server...');
-    server.close(() => {
-        console.log('Server closed.');
-        process.exit(0);
+const fetchAudioFile = async (req, res, rawUrl) => {
+    let url;
+    try { url = new URL(rawUrl); } catch { throw new HttpError(400, 'Invalid url'); }
+    if (url.protocol !== 'https:') throw new HttpError(400, 'Only https audio URLs are allowed');
+    if (url.username || url.password) throw new HttpError(400, 'Credentials in URL not allowed');
+    if (!hostAllowed(url.hostname)) throw new HttpError(403, `Host not in AUDIO_HOST_ALLOWLIST: ${url.hostname}`);
+    console.log(`[AUDIO FETCH] ${url.hostname}${url.pathname}`);
+    const up = await makeRequest(url, 'GET', { 'User-Agent': 'DoodleMinds-Studio-Proxy/1.1', 'Accept': 'audio/*,*/*' });
+    addCorsHeaders(req, res);
+    res.writeHead(up.statusCode, {
+        'Content-Type': up.headers['content-type'] || 'audio/mpeg',
+        'Content-Length': up.body.length,
     });
+    res.end(up.body);
+};
+
+const server = http.createServer(async (req, res) => {
+    try {
+        if (req.method === 'OPTIONS') { addCorsHeaders(req, res); res.writeHead(204); res.end(); return; }
+        const { pathname, searchParams } = new URL(req.url, 'http://localhost');
+
+        if (pathname === '/proxy/health') {
+            return sendJson(req, res, 200, { status: 'ok', timestamp: new Date().toISOString(), version: '1.1.0', tokenConfigured: Boolean(GENAIPRO_JWT) });
+        }
+        if (pathname === '/proxy/fetch-audio' && req.method === 'GET') {
+            const u = searchParams.get('url');
+            if (!u) return sendJson(req, res, 400, { error: 'Missing url parameter' });
+            return await fetchAudioFile(req, res, u);
+        }
+        if (pathname.startsWith('/proxy/genaipro/')) {
+            const apiPath = pathname.slice('/proxy/genaipro'.length);
+            if (req.method === 'GET' || req.method === 'DELETE') return await proxyToGenAiPro(req, res, apiPath, req.method);
+            if (req.method === 'POST') return await proxyToGenAiPro(req, res, apiPath, 'POST', await getRequestBody(req));
+            return sendJson(req, res, 405, { error: 'Method not allowed' });
+        }
+        // Legacy "/?url=" open relay removed intentionally.
+        return sendJson(req, res, 404, { error: 'Not found', availableEndpoints: ['/proxy/health', '/proxy/genaipro/*', '/proxy/fetch-audio?url=...'] });
+    } catch (err) {
+        const status = err instanceof HttpError ? err.status : 500;
+        console.error(`[PROXY ERROR] ${err.message}`);
+        if (!res.headersSent) sendJson(req, res, status, { error: err.message });
+        else res.destroy();
+    }
 });
+server.requestTimeout = TIMEOUT_MS + 10_000;
+server.headersTimeout = 30_000;
+
+server.listen(PORT, HOST, () => {
+    console.log(`Proxy listening on http://${HOST}:${PORT}  (allowed origins: ${ALLOWED_ORIGINS.join(', ')})`);
+    console.log(`Audio host allowlist: ${AUDIO_HOST_ALLOWLIST.join(', ')}`);
+});
+
+process.on('SIGINT', () => server.close(() => process.exit(0)));
