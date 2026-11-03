@@ -1,0 +1,15 @@
+# Build / caches
+build/
+__pycache__/
+*.pyc
+node_modules/
+dist/
+
+# Secrets
+.env
+.env.local
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db

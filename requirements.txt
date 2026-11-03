@@ -1,0 +1,6 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+google-cloud-aiplatform==1.71.1
+vertexai==1.71.1
+python-dotenv==1.0.0
+jinja2
