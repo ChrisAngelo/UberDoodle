@@ -18,3 +18,6 @@ Thumbs.db
 
 # Secrets saved from the Settings screen
 .uberdoodle-secrets.json
+
+# Claude Code personal overrides
+.claude/settings.local.json
