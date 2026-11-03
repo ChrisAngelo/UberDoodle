@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ProjectState, Scene, HandOption, Resolution, ExportOptions } from '../types';
 import { Play, Pause, SkipBack, SkipForward, Download, Loader2, Volume2, VolumeX, AlertTriangle, Film, Settings2, RotateCcw, Power, Square, RefreshCw, CheckSquare, Square as SquareIcon, FileAudio, MonitorOff, Search, ArrowRightCircle, Cpu, LayoutGrid, ArrowLeft, FileText, Image as ImageIcon, Archive, ArrowRight, Maximize, Clock, PlayCircle, PauseCircle, MonitorPlay, X } from 'lucide-react';
 import { renderOfflineAudio } from '../services/audioExport';
+import { GOLPO_CANVAS, GOLPO_TIMING } from '../services/golpoStyle';
 import { exportScriptToText, exportPromptsToText, exportProjectToZip } from '../services/projectExport';
 
 // Default hands + logic to find them
@@ -33,6 +34,49 @@ interface RawPoint {
     g: number;
     b: number;
 }
+
+
+// Element boundaries (pen lifts) per path, cached so the 30fps loop does no extra work.
+const elementStartsCache = new WeakMap<DrawPoint[], number[]>();
+const getElementStarts = (path: DrawPoint[]): number[] => {
+    let starts = elementStartsCache.get(path);
+    if (!starts) {
+        starts = [];
+        for (let i = 0; i < path.length; i++) if (i === 0 || path[i].isJump) starts.push(i);
+        elementStartsCache.set(path, starts);
+    }
+    return starts;
+};
+
+/**
+ * Golpo sequential reveal: maps scene progress to a path index so that elements are drawn
+ * one at a time, each getting a time slice that blends equal-per-element (Golpo's ~0.8s
+ * per stroke feel) with its point count (so big shapes are not rushed).
+ */
+const progressToPathIndex = (path: DrawPoint[], progress: number): number => {
+    const n = path.length;
+    if (n === 0) return 0;
+    const p = Math.min(1, Math.max(0, progress));
+    if (p >= 1) return n - 1;
+    const starts = getElementStarts(path);
+    const count = starts.length;
+    if (count <= 1) return Math.floor((n - 1) * p);
+    // Weight = 0.5 * equal share + 0.5 * size share
+    let acc = 0;
+    for (let e = 0; e < count; e++) {
+        const s = starts[e];
+        const end = e + 1 < count ? starts[e + 1] : n;
+        const w = 0.5 / count + 0.5 * ((end - s) / n);
+        if (p < acc + w || e === count - 1) {
+            const local = Math.min(1, Math.max(0, (p - acc) / w));
+            // ease-in-out within a stroke, like a hand accelerating then settling
+            const eased = local < 0.5 ? 2 * local * local : 1 - Math.pow(-2 * local + 2, 2) / 2;
+            return Math.min(n - 1, s + Math.floor((end - 1 - s) * eased));
+        }
+        acc += w;
+    }
+    return n - 1;
+};
 
 type PlayerState = "IDLE" | "PREPARING" | "PLAYING" | "EXPORTING" | "COMPLETED" | "ERROR";
 
@@ -216,8 +260,24 @@ const PreviewPlayer: React.FC<Props> = ({ project, setProject }) => {
   };
 
   const isVertical = project.aspectRatio === '9:16';
-  const LOGICAL_W = isVertical ? 1024 : 1536;
-  const LOGICAL_H = isVertical ? 1536 : 1024;
+  const LOGICAL_W = isVertical ? GOLPO_CANVAS.height : GOLPO_CANVAS.width;
+  const LOGICAL_H = isVertical ? GOLPO_CANVAS.width : GOLPO_CANVAS.height;
+
+  /**
+   * Golpo-style pacing: the drawing must finish GOLPO_TIMING.holdSec before the scene
+   * ends so the completed doodle holds on screen, and every element (stroke group
+   * between pen lifts) gets at least ~strokeDrawSec, drawn strictly one after another.
+   */
+  const getDrawingDuration = (sceneDurationMs: number, pace: number, path: DrawPoint[]) => {
+      const holdMs = GOLPO_TIMING.holdSec * 1000;
+      let elements = 0;
+      for (let i = 0; i < path.length; i++) if (i === 0 || path[i].isJump) elements++;
+      const perElementMs = (GOLPO_TIMING.strokeDrawSec * 1000) / Math.max(0.1, pace);
+      // Clamp the per-element budget so very busy images still finish in the scene.
+      const available = Math.max(500, sceneDurationMs - holdMs);
+      const ideal = Math.max(1, elements) * perElementMs;
+      return Math.max(500, Math.min(available, Math.max(available * 0.6, Math.min(ideal, available))));
+  };
 
   const allReady = () => isImageLoadedRef.current && isMaskReadyRef.current && isPathsReadyRef.current && isCanvasReadyRef.current;
 
@@ -484,7 +544,13 @@ const PreviewPlayer: React.FC<Props> = ({ project, setProject }) => {
           stopSfx();
           stopMusic();
           playerStateRef.current = "IDLE";
-          if (audioContextRef.current) audioContextRef.current.suspend();
+          // Close (not just suspend) so the AudioContext and its media nodes are released on unmount.
+          if (audioContextRef.current) {
+              const ctx = audioContextRef.current;
+              audioContextRef.current = null;
+              videoMediaNodesMapRef.current.clear();
+              ctx.close().catch(() => {});
+          }
       }
   }, []);
 
@@ -1034,9 +1100,9 @@ const PreviewPlayer: React.FC<Props> = ({ project, setProject }) => {
       let virtualElapsed = 0;
       const audioDuration = getSceneDuration(activeIndex);
       const pace = Math.max(0.1, currentProject.scenes[activeIndex]?.customPace || currentProject.drawingPace || 1.0);
-      const drawingDuration = audioDuration / pace;
-      
-      const totalSceneDuration = Math.max(audioDuration, drawingDuration);
+      const drawingDuration = getDrawingDuration(audioDuration, pace, drawingPathRef.current);
+      // Scene length is driven by narration; the hold is carved out of it (min hold guaranteed).
+      const totalSceneDuration = Math.max(audioDuration, drawingDuration + GOLPO_TIMING.holdSec * 1000);
       
       let lastFrameTime = performance.now();
       
@@ -1122,7 +1188,8 @@ const PreviewPlayer: React.FC<Props> = ({ project, setProject }) => {
       
       const audioDuration = getSceneDuration(activeIndex);
       const pace = Math.max(0.1, scene?.customPace || currentProject.drawingPace || 1.0);
-      const visualProgress = Math.min(1, elapsed / (audioDuration / pace));
+      const drawingDuration = getDrawingDuration(audioDuration, pace, drawingPathRef.current);
+      const visualProgress = Math.max(0, Math.min(1, elapsed / drawingDuration));
       sceneProgressRef.current = visualProgress;
       
       if (scene.type === 'video' && videoRefs.current.has(scene.id)) {
@@ -1154,7 +1221,7 @@ const PreviewPlayer: React.FC<Props> = ({ project, setProject }) => {
 
       drawFrame(visualProgress, elapsed);
 
-      if (visualProgress >= 1 && elapsed >= audioDuration) {
+      if (visualProgress >= 1 && elapsed >= Math.max(audioDuration, drawingDuration + GOLPO_TIMING.holdSec * 1000)) {
           drawFrame(1.0, elapsed);
           handleSceneComplete();
           return;
@@ -1233,7 +1300,7 @@ const PreviewPlayer: React.FC<Props> = ({ project, setProject }) => {
       if (!maskCtx || !brush || !targetCanvas || path.length === 0) return;
 
       const safeProgress = Math.min(1, Math.max(0, progress));
-      const targetIndex = Math.floor((path.length - 1) * safeProgress);
+      const targetIndex = progressToPathIndex(path, safeProgress);
       const prevIndex = lastDrawnPointIndexRef.current;
       if (targetIndex <= prevIndex && progress < 1.0) return;
 
@@ -1355,7 +1422,7 @@ const PreviewPlayer: React.FC<Props> = ({ project, setProject }) => {
           ctx.drawImage(bgImg, x, y, bgImg.width * scale, bgImg.height * scale);
       } else {
           const blendMode = scene.layerBlendMode || 'multiply';
-          ctx.fillStyle = blendMode === 'screen' ? '#000000' : '#FEFEFD';
+          ctx.fillStyle = blendMode === 'screen' ? '#000000' : GOLPO_CANVAS.background;
           ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
       }
 
@@ -1379,7 +1446,7 @@ const PreviewPlayer: React.FC<Props> = ({ project, setProject }) => {
               logicalX = handPosOverride.x;
               logicalY = handPosOverride.y;
           } else if (path.length > 0) {
-              const pt = path[Math.floor((path.length - 1) * Math.min(1, Math.max(0, progress)))];
+              const pt = path[progressToPathIndex(path, progress)];
               if(pt) { logicalX = pt.x; logicalY = pt.y; }
           } else if (currentTipPosRef.current) {
               logicalX = currentTipPosRef.current.x;
@@ -1501,6 +1568,8 @@ const PreviewPlayer: React.FC<Props> = ({ project, setProject }) => {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      // Revoke after the download has been handed off to avoid leaking the blob.
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
 
   const handleExportVideo = async () => {
