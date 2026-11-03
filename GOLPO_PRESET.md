@@ -30,3 +30,13 @@ Source: 10:04 video, 1536x1024, 30fps. Analyzed 20 frames (1 per 30s) with k-mea
 - Stroke width 4px, round caps, slight jitter.
 - Sequential draw-on, 0.8s per stroke, 1.5s hold.
 - Match Golpo's 3:2 canvas and sequential reveal for best accuracy.
+
+## Engine (`services/golpoStyle.ts`)
+Dependency-free module that encodes this preset; all Golpo-mode code should import from it rather than hard-coding values.
+- Constants: `GOLPO_CANVAS` (1536x1024, #FEFEFD, 3:2), `GOLPO_PALETTE` (ink, inkSoft, fill, fillLight, mid, accent, shadow), `GOLPO_STROKE` (4px, round caps/joins, 2-4px jitter), `GOLPO_TIMING` (0.8s draw, 1.5s hold, clamp 0.6-1.2s).
+- `buildGolpoImagePrompt(scene, { characterLock?, textLabels? })`: sectioned prompt (STYLE / SCENE / CHARACTER / LINEWORK / COLOR with hex values / COMPOSITION 3:2 / TEXT / NEGATIVE). Labels capped at 4, rendered as hand-lettered uppercase marker; no labels means "no text". `GOLPO_NEGATIVE_PROMPT` is exported separately for models with a negative-prompt field.
+- `jitterPath(points, seed)`: deterministic (mulberry32) wobble; subdivides segments every ~24px, perpendicular 2-4px offset, original vertices preserved.
+- `strokeDurationSec(len)`: 0.8s at 600px, scaled by sqrt(length), clamped 0.6-1.2s.
+- `applyGolpoContext(ctx)`: ink stroke, tan fill, 4px width scaled to canvas width, round caps/joins.
+- `quantizeToGolpoPalette(r,g,b)`: nearest of paper + palette by CIELAB (CIE76) distance.
+- `golpoizeImageData(img, { strength=0.75 })`: in-place post-process; near-white/neutral pixels to exact #FEFEFD, others blended toward nearest palette color, off-palette hues snapped harder. Alpha kept; per-color cache for speed.
