@@ -2,6 +2,9 @@ import { GoogleGenAI, Type, Modality, ApiError } from "@google/genai";
 import { Scene, VeoModel, TitleGenerationResult, DescriptionGenerationResult, ArtStyle, BrushStyle, AspectRatio, GenAiProConfig, ThumbnailStyle } from "../types";
 import { generateLabsSpeech } from "./genAiProService";
 import { buildGolpoImagePrompt, golpoizeDataUrl } from "./golpoStyle";
+import { getSettings, getGeminiKey } from "./settings";
+import { kieGenerateImage, kieGenerateVeo } from "./kieService";
+import { getLocalServer, localChat } from "./localLlmService";
 
 /** Palette snap applied to pure-Golpo frames (0 = off, 1 = hard snap). Gentle by default to keep line detail. */
 const GOLPO_POSTPROCESS_STRENGTH = 0.4;
@@ -30,14 +33,13 @@ export const GEMINI_MODELS = {
 export const DOODLE_IMAGE_ASPECT = (aspectRatio?: AspectRatio | string): '3:2' | '2:3' =>
     aspectRatio === '9:16' || aspectRatio === '2:3' ? '2:3' : '3:2';
 
-const getApiKey = (): string => (process.env.API_KEY || process.env.GEMINI_API_KEY || '') as string;
+const getApiKey = (): string => getGeminiKey();
 let _ai: GoogleGenAI | null = null;
+let _aiKey = '';
 const getAi = (): GoogleGenAI => {
-    if (!_ai) {
-        const apiKey = getApiKey();
-        if (!apiKey) throw new GeminiServiceError('auth', 'Gemini API key is missing. Set GEMINI_API_KEY in .env.local.');
-        _ai = new GoogleGenAI({ apiKey });
-    }
+    const apiKey = getApiKey();
+    if (!apiKey) throw new GeminiServiceError('auth', 'Gemini API key is missing. Add it in Settings (or GEMINI_API_KEY in .env.local).');
+    if (!_ai || _aiKey !== apiKey) { _ai = new GoogleGenAI({ apiKey }); _aiKey = apiKey; } // rebuild when the key changes in Settings
     return _ai;
 };
 
@@ -117,8 +119,42 @@ export async function withRetry<T>(fn: (signal: AbortSignal) => Promise<T>, opts
 
 type GenParams = Parameters<GoogleGenAI['models']['generateContent']>[0];
 /** generateContent wrapped in retry + timeout. */
-const generate = (params: GenParams, opts: RetryOptions = {}) =>
-    withRetry(signal => getAi().models.generateContent({ ...params, config: { ...(params.config || {}), abortSignal: signal } }), opts);
+const generate = async (params: GenParams, opts: RetryOptions = {}): Promise<{ text?: string; candidates?: any[] } & Record<string, any>> => {
+    const local = textOnlyPrompt(params) !== null ? getLocalServer(getSettings().textProvider) : null;
+    if (local) {
+        const cfg: any = params.config || {};
+        const sys = typeof cfg.systemInstruction === 'string' ? cfg.systemInstruction : undefined;
+        const json = cfg.responseMimeType === 'application/json' || !!cfg.responseSchema;
+        const schemaHint = cfg.responseSchema ? `\nThe JSON must match this schema: ${JSON.stringify(cfg.responseSchema)}` : '';
+        const text = await localChat(local, textOnlyPrompt(params)! + schemaHint, { system: sys, json, temperature: cfg.temperature });
+        return { text, candidates: [{ content: { parts: [{ text }] } }] };
+    }
+    return withRetry(signal => getAi().models.generateContent({ ...params, config: { ...(params.config || {}), abortSignal: signal } }), opts);
+};
+
+/**
+ * Returns the prompt text when a request is text-in/text-out (eligible for a local LLM),
+ * or null when it carries images/audio or asks for image/audio output (stays on Gemini).
+ */
+function textOnlyPrompt(params: GenParams): string | null {
+    const cfg: any = params.config || {};
+    const mods: string[] = (cfg.responseModalities || []).map(String);
+    if (mods.some(m => /IMAGE|AUDIO/i.test(m)) || cfg.speechConfig || cfg.imageConfig) return null;
+    const c: any = params.contents;
+    if (typeof c === 'string') return c;
+    const items = Array.isArray(c) ? c : [c];
+    const texts: string[] = [];
+    for (const item of items) {
+        if (typeof item === 'string') { texts.push(item); continue; }
+        const parts = item?.parts ?? [item];
+        for (const p of parts) {
+            if (typeof p === 'string') texts.push(p);
+            else if (typeof p?.text === 'string' && Object.keys(p).length === 1) texts.push(p.text);
+            else return null;
+        }
+    }
+    return texts.join('\n\n');
+}
 
 const TEXT_TIMEOUT = 90_000;
 const IMAGE_TIMEOUT = 120_000;
@@ -493,6 +529,11 @@ export const generateSceneImage = async (prompt: string, artStyle: ArtStyle, bru
     if (colorSplash) fullPrompt += `\n\nACCENT COLOR PREFERENCE: ${colorSplash}`;
     if (brushStyle) fullPrompt += `\n\nBRUSH: ${brushStyle}`;
 
+    if (getSettings().imageProvider === 'kie') {
+        const raw = await kieGenerateImage(fullPrompt, { aspectRatio: DOODLE_IMAGE_ASPECT(aspectRatio) });
+        return !variant ? golpoizeDataUrl(raw, { strength: GOLPO_POSTPROCESS_STRENGTH }) : raw;
+    }
+
     const response = await generate({
         model: GEMINI_MODELS.image,
         contents: fullPrompt,
@@ -507,6 +548,10 @@ export const generateSceneImage = async (prompt: string, artStyle: ArtStyle, bru
 
 export const editImageWithGemini = async (imageBase64: string, prompt: string, aspectRatio: AspectRatio): Promise<string> => {
     const img = parseDataUrl(imageBase64);
+    if (getSettings().imageProvider === 'kie') {
+        return kieGenerateImage(`${prompt}\n\nKeep the existing hand-drawn whiteboard doodle style, line weight, palette and any characters exactly consistent.`,
+            { aspectRatio: DOODLE_IMAGE_ASPECT(aspectRatio), imageInputs: [imageBase64] });
+    }
     const response = await generate({
         model: GEMINI_MODELS.image,
         contents: {
@@ -573,6 +618,7 @@ export const scanAndTranslateImageText = async (imageBase64: string, language: s
 
 export const generateHighCTRThumbnail = async (context: string, niche: string, style: ThumbnailStyle, customPrompt?: string, stylePrompt?: string, colorPairDesc?: string): Promise<string> => {
     const fullPrompt = `Generate a high CTR YouTube thumbnail for a ${niche} video. Context: ${context}. Style: ${style}. ${stylePrompt || ''} ${customPrompt || ''} ${colorPairDesc || ''}`.trim();
+    if (getSettings().imageProvider === 'kie') return kieGenerateImage(fullPrompt, { aspectRatio: '16:9', resolution: '1K' });
     const response = await generate({
         model: GEMINI_MODELS.image,
         contents: { parts: [{ text: fullPrompt }] },
@@ -587,6 +633,10 @@ export const generateHighCTRThumbnail = async (context: string, niche: string, s
 
 // Veo video generation (long-running operation with bounded polling)
 export const generateVeoVideo = async (model: VeoModel, prompt: string, aspectRatio: AspectRatio, durationSeconds: number, inputImageUrl?: string): Promise<string> => {
+    if (getSettings().videoProvider === 'kie') {
+        // Kie Veo 3 clips are fixed-length (~8s); durationSeconds is ignored there.
+        return kieGenerateVeo(prompt, { aspectRatio: aspectRatio === '9:16' ? '9:16' : '16:9', imageUrl: inputImageUrl });
+    }
     const ai = getAi();
     const config: any = {
         numberOfVideos: 1,

@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { getSettings } from './services/settings';
 import { ProjectState } from './types';
 import ScriptEditor from './components/ScriptEditor';
 const Storyboard = React.lazy(() => import('./components/Storyboard'));
 const PreviewPlayer = React.lazy(() => import('./components/PreviewPlayer'));
 const ThumbnailCreator = React.lazy(() => import('./components/ThumbnailCreator'));
 const JackTheRipper = React.lazy(() => import('./components/JackTheRipper'));
+const SettingsModal = React.lazy(() => import('./components/SettingsModal'));
 
 type BoundaryProps = { children: React.ReactNode; label?: string; resetKey?: unknown };
 type BoundaryState = { error: Error | null };
@@ -41,7 +43,7 @@ const PanelLoading: React.FC<{ label?: string }> = ({ label = 'Loading' }) => (
     <span className="text-sm font-semibold">{label}...</span>
   </div>
 );
-import { PenTool, Image, Film, Menu, Save, Upload, Undo, Redo, LayoutTemplate, FilePlus, Sparkles, MonitorPlay, Sun, Moon, Trash2, RefreshCw, Power, Scissors, Sword } from 'lucide-react';
+import { PenTool, Image, Film, Menu, Save, Upload, Undo, Redo, LayoutTemplate, FilePlus, Sparkles, MonitorPlay, Sun, Moon, Trash2, RefreshCw, Power, Scissors, Sword, Settings as SettingsIcon } from 'lucide-react';
 
 // --- ATTRIBUTION & VERSION CONTROL ---
 // OWNER: Christian Angelo Nilsén 19801031-0137
@@ -112,6 +114,7 @@ export interface JackPersistedState {
 const App: React.FC = () => {
   const [history, setHistory] = useState<ProjectState[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [showSettings, setShowSettings] = useState(false);
   const isHistoryAction = useRef(false);
 
   const [project, _setProject] = useState<ProjectState>(INITIAL_PROJECT_STATE);
@@ -421,8 +424,10 @@ const App: React.FC = () => {
                 {project.currentStep === 'thumbnails' && <><LayoutTemplate size={20} className="text-highlight"/> Viral Thumbnail Creator</>}
             </h2>
             <div className="flex items-center gap-4">
+                <button onClick={() => setShowSettings(true)} className={`p-2 rounded-full transition-colors border shadow-sm ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`} title="Settings & API keys" aria-label="Settings and API keys"><SettingsIcon size={16} /></button>
                 <button onClick={handleManualThemeToggle} className={`p-2 rounded-full transition-colors border shadow-sm ${isDarkMode ? 'bg-slate-800 border-slate-700 text-yellow-400 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`} title={isDarkMode ? "Light Mode" : "Dark Mode"} aria-label={isDarkMode ? "Light Mode" : "Dark Mode"}>{isDarkMode ? <Sun size={16} /> : <Moon size={16} />}</button>
-                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border shadow-sm ${isDarkMode ? 'bg-green-900/20 text-green-400 border-green-900/50' : 'bg-green-50 text-green-700 border-green-200'}`}><div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>Vertex AI Live</div>
+                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border shadow-sm ${isDarkMode ? 'bg-green-900/20 text-green-400 border-green-900/50' : 'bg-green-50 text-green-700 border-green-200'}`}><div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>{getSettings().textProvider === "gemini" ? "Gemini" : getSettings().textProvider === "lmstudio" ? "LM Studio" : "Unsloth"} Live</div>
+                {showSettings && <React.Suspense fallback={null}><SettingsModal onClose={() => setShowSettings(false)} /></React.Suspense>}
             </div>
         </div>
         <div className="flex-1 overflow-auto scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent p-3 md:p-6">

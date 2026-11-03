@@ -81,3 +81,26 @@ CI (`.github/workflows/ci.yml`) runs `npm ci`, typecheck, tests, build and a `py
   - It validates inputs: prompt length, project ID and location format, and that the credentials are a service-account JSON.
   - `/generate-demo` is disabled unless `ENABLE_DEMO=1`.
   - Dependencies are pinned in `requirements.txt`.
+
+
+## Settings, providers & API keys
+
+Click the **gear icon** (top right) to open **Settings & API Keys**. Everything saved there persists after closing the app:
+
+| What | Where it is stored |
+|---|---|
+| Gemini, LMNT, ElevenLabs keys, provider choices, local LLM URLs/models | Browser `localStorage` on this PC |
+| Kie.ai key, GenAiPro token | Local proxy writes `.uberdoodle-secrets.json` (gitignored, `chmod 600`). Never stored in the browser. |
+
+The proxy must be running (`npm run proxy`, or `START.bat`) for Kie, GenAiPro and saving proxy-held keys.
+
+### Kie.ai: Nano Banana + Veo 3
+- **Images:** set **Images → Kie · Nano Banana**. Model `nano-banana-pro` (or `nano-banana-2`). It uses `POST /api/v1/jobs/createTask` and polls `recordInfo`. Frames are requested at 3:2 and get the Golpo palette post-process.
+- **Video:** set **Video → Kie · Veo 3**. Model `veo3_fast` (or `veo3`). It uses `POST /api/v1/veo/generate` and polls `veo/record-info`. A scene image is uploaded and used as the first frame.
+- Every call goes through the proxy (`/proxy/kie/api/v1/*`), which adds your key server-side.
+
+### Local LLMs: LM Studio & Unsloth
+Set **Text / scripts → LM Studio** or **Unsloth**. Text-only tasks (scripts, scene breakdown, hooks, titles, translation) then run locally. Image analysis, transcription and TTS stay on cloud providers.
+- **LM Studio:** Developer tab → *Start Server*, enable **CORS**. Default `http://localhost:1234/v1`.
+- **Unsloth:** serve your Unsloth model with any OpenAI-compatible server: Unsloth Studio, llama.cpp `llama-server -m model.gguf --port 8080`, or `vllm serve <model> --port 8081 --allowed-origins '["http://localhost:5173"]'`. Port 8000 is taken by the Python backend. Default `http://localhost:8080/v1`.
+- Click **Test** in Settings to list the loaded models.

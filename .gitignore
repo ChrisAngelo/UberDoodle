@@ -15,3 +15,6 @@ dist/
 .DS_Store
 Thumbs.db
 .venv*/
+
+# Secrets saved from the Settings screen
+.uberdoodle-secrets.json

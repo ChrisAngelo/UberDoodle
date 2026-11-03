@@ -1,4 +1,5 @@
 import { GenAiProConfig } from "../types";
+import { getSettings } from "./settings";
 
 // =============================================================================
 // DOODLEMINDS STUDIO - COMPREHENSIVE TTS SERVICE
@@ -9,15 +10,15 @@ import { GenAiProConfig } from "../types";
 // SECURITY: keys are read from Vite env (.env.local) and never hardcoded or logged.
 // Anything prefixed VITE_ is shipped to the browser; prefer routing via the local proxy.
 const ENV: Record<string, string | undefined> = ((import.meta as any).env || {}) as Record<string, string | undefined>;
-const LMNT_API_KEY = ENV.VITE_LMNT_API_KEY || "";
-const ELEVENLABS_API_KEY = ENV.VITE_ELEVENLABS_API_KEY || "";
-const GENAIPRO_JWT = ENV.VITE_GENAIPRO_JWT || "";
+// Keys come from Settings (persisted in localStorage), falling back to .env.local.
+// GenAiPro's JWT lives in the local proxy (Settings → saved to disk), never in the browser.
+const keys = () => getSettings();
 
 // --- API URLS ---
 const LMNT_API_URL = "https://api.lmnt.com/v1/ai/speech";
 const ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1";
 const GENAIPRO_API_URL = "https://genaipro.vn/api/v1";
-const LOCAL_PROXY_URL = ENV.VITE_TTS_PROXY_URL || "http://localhost:3002/proxy";
+const proxyUrl = () => keys().proxyUrl.replace(/\/$/, "");
 
 // --- NETWORK HELPERS ---
 const RETRYABLE = (status: number) => status === 429 || status >= 500;
@@ -88,12 +89,12 @@ export interface VoiceFilterParams {
 export const generateLMNTSpeech = async (text: string, voiceId: string, speed: number = 1.0): Promise<string> => {
     console.log(`[LMNT] Generating speech with voice: ${voiceId}`);
     
-    if (!LMNT_API_KEY) throw new Error('LMNT API key missing (set VITE_LMNT_API_KEY)');
+    if (!keys().lmntApiKey) throw new Error('LMNT API key missing (set VITE_keys().lmntApiKey)');
     try {
         const response = await fetchWithRetry(LMNT_API_URL, {
             method: 'POST',
             headers: {
-                'X-API-Key': LMNT_API_KEY,
+                'X-API-Key': keys().lmntApiKey,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
@@ -138,11 +139,11 @@ export const generateElevenLabsSpeech = async (
             }
         };
         
-        if (!ELEVENLABS_API_KEY) throw new Error('ElevenLabs API key missing (set VITE_ELEVENLABS_API_KEY)');
+        if (!keys().elevenLabsApiKey) throw new Error('ElevenLabs API key missing (set VITE_keys().elevenLabsApiKey)');
         const response = await fetchWithRetry(`${ELEVENLABS_API_URL}/text-to-speech/${encodeURIComponent(voiceId)}`, {
             method: 'POST',
             headers: {
-                'xi-api-key': ELEVENLABS_API_KEY,
+                'xi-api-key': keys().elevenLabsApiKey,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify(payload)
@@ -173,7 +174,7 @@ export const generateGenAiProSpeech = async (
     
     try {
         // Step 1: Create TTS task via proxy
-        const createResponse = await fetchWithRetry(`${LOCAL_PROXY_URL}/genaipro/labs/task`, {
+        const createResponse = await fetchWithRetry(`${proxyUrl()}/genaipro/labs/task`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -205,7 +206,7 @@ export const generateGenAiProSpeech = async (
             
             let statusResponse: Response;
             try {
-                statusResponse = await fetchWithRetry(`${LOCAL_PROXY_URL}/genaipro/labs/task/${encodeURIComponent(taskId)}`, {}, { timeoutMs: 15_000, retries: 1 });
+                statusResponse = await fetchWithRetry(`${proxyUrl()}/genaipro/labs/task/${encodeURIComponent(taskId)}`, {}, { timeoutMs: 15_000, retries: 1 });
             } catch {
                 continue; // transient poll failure; keep polling until deadline
             }
@@ -216,7 +217,7 @@ export const generateGenAiProSpeech = async (
                 
                 if (statusData.status === 'completed' && statusData.result) {
                     // Step 3: Fetch audio file via proxy
-                    const audioResponse = await fetchWithRetry(`${LOCAL_PROXY_URL}/fetch-audio?url=${encodeURIComponent(statusData.result)}`, {}, { timeoutMs: 60_000 });
+                    const audioResponse = await fetchWithRetry(`${proxyUrl()}/fetch-audio?url=${encodeURIComponent(statusData.result)}`, {}, { timeoutMs: 60_000 });
                     if (!audioResponse.ok) throw new Error(`GenAiPro audio download failed: ${audioResponse.status}`);
                     const blob = await audioResponse.blob();
                     console.log(`[GenAiPro] Audio received: ${blob.size} bytes`);
@@ -251,7 +252,7 @@ export const fetchGenAiProVoices = async (filters: VoiceFilterParams = {}): Prom
         if (filters.age) params.append('age', filters.age);
         if (filters.category) params.append('category', filters.category);
         
-        const response = await fetchWithRetry(`${LOCAL_PROXY_URL}/genaipro/labs/voices?${params.toString()}`, {}, { timeoutMs: 15_000, retries: 1 });
+        const response = await fetchWithRetry(`${proxyUrl()}/genaipro/labs/voices?${params.toString()}`, {}, { timeoutMs: 15_000, retries: 1 });
         
         if (response.ok) {
             const data = await response.json();
@@ -273,10 +274,10 @@ export const fetchGenAiProVoices = async (filters: VoiceFilterParams = {}): Prom
 export const fetchElevenLabsVoices = async (): Promise<LabVoice[]> => {
     console.log('[ElevenLabs] Fetching voices directly...');
     
-    if (!ELEVENLABS_API_KEY) return [];
+    if (!keys().elevenLabsApiKey) return [];
     try {
         const response = await fetchWithRetry(`${ELEVENLABS_API_URL}/voices`, {
-            headers: { 'xi-api-key': ELEVENLABS_API_KEY }
+            headers: { 'xi-api-key': keys().elevenLabsApiKey }
         }, { timeoutMs: 15_000, retries: 1 });
         
         if (response.ok) {
@@ -406,7 +407,7 @@ const blobToDataUri = (blob: Blob): Promise<string> => {
 // =============================================================================
 export const checkProxyStatus = async (): Promise<boolean> => {
     try {
-        const response = await fetchWithRetry(`${LOCAL_PROXY_URL}/health`, {}, { timeoutMs: 3_000, retries: 0 });
+        const response = await fetchWithRetry(`${proxyUrl()}/health`, {}, { timeoutMs: 3_000, retries: 0 });
         return response.ok;
     } catch {
         return false;
@@ -417,8 +418,8 @@ export const checkProxyStatus = async (): Promise<boolean> => {
 // GET API INFO (for debugging)
 // =============================================================================
 export const getApiInfo = () => ({
-    lmnt: { url: LMNT_API_URL, hasKey: !!LMNT_API_KEY },
-    elevenlabs: { url: ELEVENLABS_API_URL, hasKey: !!ELEVENLABS_API_KEY },
-    genaipro: { url: GENAIPRO_API_URL, hasKey: !!GENAIPRO_JWT },
-    proxy: { url: LOCAL_PROXY_URL }
+    lmnt: { url: LMNT_API_URL, hasKey: !!keys().lmntApiKey },
+    elevenlabs: { url: ELEVENLABS_API_URL, hasKey: !!keys().elevenLabsApiKey },
+    genaipro: { url: GENAIPRO_API_URL, hasKey: true /* held by the local proxy; see Settings */ },
+    proxy: { url: proxyUrl() }
 });
